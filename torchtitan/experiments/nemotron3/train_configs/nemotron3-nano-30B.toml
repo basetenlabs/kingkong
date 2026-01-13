@@ -54,7 +54,7 @@ context_parallel_degree = 1
 [checkpoint]
 enable = true
 folder = "checkpoint"
-interval = 500
+interval = 50
 last_save_model_only = false
 export_dtype = "bfloat16"
 async_mode = "disabled" # ["disabled", "async", "async_with_pinned_mem"]
@@ -81,4 +81,4 @@ filter_fqns = ["output"]
 enable = false
 dataset = "c4_validation"
 freq = 500
-steps = 1200
+steps = 100
