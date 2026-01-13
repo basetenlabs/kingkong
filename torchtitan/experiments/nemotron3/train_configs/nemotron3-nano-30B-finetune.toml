@@ -1,0 +1,81 @@
+# NOTE: this toml config is a preset for NemotronH-nano-30B with bf16 precision.
+# Uses FineWeb dataset from HuggingFace - a high-quality web dataset for LLM training.
+# NemotronH is a hybrid Mamba2 + Attention architecture.
+
+[job]
+dump_folder = "./outputs"
+description = "Nemotron3 Nano 30B - FineWeb Training"
+
+[profiling]
+enable_profiling = false        # Change from false to true
+save_traces_folder = "profile_trace"
+profile_freq = 100             # Profile every 100 steps
+profiler_warmup = 3            # Warmup steps before profiling
+profiler_active = 1            # Number of active profiling steps
+
+[metrics]
+log_freq = 10
+enable_tensorboard = true
+save_tb_folder = "tb"
+enable_wandb = true
+
+[model]
+name = "nemotron3"
+flavor = "nano-30B"
+hf_assets_path = "./assets/hf/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+
+[optimizer]
+name = "AdamW"
+lr = 3e-5
+eps = 1e-8
+
+[lr_scheduler]
+warmup_steps = 500  # lr scheduler warm up
+
+[training]
+local_batch_size = 1
+seq_len = 2048
+max_norm = 1.0  # grad norm clipping
+steps = 500
+dtype = "bfloat16"
+
+# Custom HuggingFace dataset - FineWeb (high-quality web text)
+# Uses the hf:// prefix to load any HF dataset without code changes
+dataset = "hf://HuggingFaceFW/fineweb"
+dataset_split = "train"
+dataset_config_name = "sample-10BT"  # Use the 10B token sample subset
+text_column = "text"
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+fsdp_reshard_after_forward = "default" # default / never / always
+tensor_parallel_degree = 1
+context_parallel_degree = 1
+
+[checkpoint]
+enable = true
+folder = "checkpoint"
+interval = 250
+last_save_model_only = true
+last_save_in_hf = true
+export_dtype = "bfloat16"
+async_mode = "disabled" # ["disabled", "async", "async_with_pinned_mem"]
+
+# Load pretrained HuggingFace checkpoint
+initial_load_path = "./assets/hf/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+initial_load_in_hf = true
+initial_load_model_only = true
+
+[activation_checkpoint]
+mode = "full"  # ["none", "selective", "full"]
+selective_ac_option = "op"  # "int" = ac every positive int layer or 'op', ac based on ops policy
+
+[compile]
+enable = true
+components = ["model", "loss"]
+
+[quantize.linear.float8]
+enable_fsdp_float8_all_gather = false
+precompute_float8_dynamic_scale_for_fsdp = false
+filter_fqns = ["output"]
