@@ -22,6 +22,9 @@ from torchtitan.hf_datasets import DatasetConfig
 from torchtitan.tools.logging import logger
 
 
+HF_DATASET_PREFIX = "hf://"
+
+
 def _load_c4_dataset(dataset_path: str, split: str):
     """Load C4 dataset with default configuration."""
     return load_dataset(dataset_path, name="en", split=split, streaming=True)
@@ -30,6 +33,43 @@ def _load_c4_dataset(dataset_path: str, split: str):
 def _process_c4_text(sample: dict[str, Any]) -> str:
     """Process C4 dataset sample text."""
     return sample["text"]
+
+
+def _create_custom_hf_loader(
+    split: str = "train",
+    config_name: str | None = None,
+) -> Callable:
+    """Create a loader function for custom HuggingFace datasets."""
+
+    def loader(dataset_path: str):
+        logger.info(
+            f"Loading custom HuggingFace dataset from {dataset_path} "
+            f"(split={split}, config={config_name})"
+        )
+        return load_dataset(
+            dataset_path,
+            name=config_name,
+            split=split,
+            streaming=True,
+        )
+
+    return loader
+
+
+def _create_custom_text_processor(text_column: str = "text") -> Callable:
+    """Create a text processor for custom datasets with configurable column name."""
+
+    def processor(sample: dict[str, Any]) -> str:
+        if text_column not in sample:
+            available_columns = list(sample.keys())
+            raise KeyError(
+                f"Text column '{text_column}' not found in dataset sample. "
+                f"Available columns: {available_columns}. "
+                f"Set 'text_column' in your config to the correct column name."
+            )
+        return sample[text_column]
+
+    return processor
 
 
 # Add your dataset here - more information at docs/datasets.md
@@ -53,13 +93,51 @@ DATASETS = {
 
 
 def _validate_dataset(
-    dataset_name: str, dataset_path: str | None = None
+    dataset_name: str,
+    dataset_path: str | None = None,
+    text_column: str = "text",
+    dataset_split: str = "train",
+    dataset_config_name: str | None = None,
 ) -> tuple[str, Callable, Callable]:
-    """Validate dataset name and path."""
+    """
+    Validate dataset name and path.
+
+    Supports two modes:
+    1. Registered datasets: Use dataset_name to look up pre-configured datasets
+    2. Custom HF datasets: Use "hf://<path>" prefix to load any HuggingFace dataset
+
+    Args:
+        dataset_name: Name of registered dataset or "hf://<hf_path>" for custom datasets
+        dataset_path: Optional override path for the dataset
+        text_column: Column name containing text (for custom datasets)
+        dataset_split: Split to load (for custom datasets)
+        dataset_config_name: Optional config/subset name (for custom datasets)
+
+    Returns:
+        Tuple of (path, loader_fn, processor_fn)
+    """
+    # Check if this is a custom HuggingFace dataset (hf:// prefix)
+    if dataset_name.startswith(HF_DATASET_PREFIX):
+        hf_path = dataset_name[len(HF_DATASET_PREFIX) :]
+        path = dataset_path or hf_path
+        loader = _create_custom_hf_loader(
+            split=dataset_split,
+            config_name=dataset_config_name,
+        )
+        processor = _create_custom_text_processor(text_column)
+        logger.info(
+            f"Preparing custom HuggingFace dataset '{hf_path}' from {path} "
+            f"(split={dataset_split}, text_column={text_column})"
+        )
+        return path, loader, processor
+
+    # Otherwise, use registered datasets
     if dataset_name not in DATASETS:
         raise ValueError(
-            f"Dataset {dataset_name} is not supported. "
-            f"Supported datasets are: {list(DATASETS.keys())}"
+            f"Dataset '{dataset_name}' is not supported. "
+            f"Supported datasets are: {list(DATASETS.keys())}. "
+            f"To load a custom HuggingFace dataset, use the 'hf://' prefix, "
+            f"e.g., 'hf://allenai/c4' or 'hf://username/dataset_name'."
         )
 
     config = DATASETS[dataset_name]
@@ -78,12 +156,20 @@ class HuggingFaceTextDataset(IterableDataset, Stateful):
         dp_rank: int = 0,
         dp_world_size: int = 1,
         infinite: bool = False,
+        text_column: str = "text",
+        dataset_split: str = "train",
+        dataset_config_name: str | None = None,
     ) -> None:
-        # Force lowercase for consistent comparison
-        dataset_name = dataset_name.lower()
+        # Force lowercase for consistent comparison (but preserve hf:// prefix case for paths)
+        if not dataset_name.startswith(HF_DATASET_PREFIX):
+            dataset_name = dataset_name.lower()
 
         path, dataset_loader, text_processor = _validate_dataset(
-            dataset_name, dataset_path
+            dataset_name,
+            dataset_path,
+            text_column=text_column,
+            dataset_split=dataset_split,
+            dataset_config_name=dataset_config_name,
         )
         ds = dataset_loader(path)
 
@@ -186,6 +272,9 @@ def build_text_dataloader(
     dataset_path = job_config.training.dataset_path
     batch_size = job_config.training.local_batch_size
     seq_len = job_config.training.seq_len
+    text_column = job_config.training.text_column
+    dataset_split = job_config.training.dataset_split
+    dataset_config_name = job_config.training.dataset_config_name
 
     hf_ds = HuggingFaceTextDataset(
         dataset_name=dataset_name,
@@ -195,6 +284,9 @@ def build_text_dataloader(
         dp_rank=dp_rank,
         dp_world_size=dp_world_size,
         infinite=infinite,
+        text_column=text_column,
+        dataset_split=dataset_split,
+        dataset_config_name=dataset_config_name,
     )
 
     dataloader_kwargs = {
@@ -230,6 +322,9 @@ def build_text_validation_dataloader(
     dataset_path = job_config.validation.dataset_path
     batch_size = job_config.validation.local_batch_size
     seq_len = job_config.validation.seq_len
+    text_column = job_config.validation.text_column
+    dataset_split = job_config.validation.dataset_split
+    dataset_config_name = job_config.validation.dataset_config_name
 
     hf_ds = HuggingFaceTextDataset(
         dataset_name=dataset_name,
@@ -239,6 +334,9 @@ def build_text_validation_dataloader(
         dp_rank=dp_rank,
         dp_world_size=dp_world_size,
         infinite=infinite,
+        text_column=text_column,
+        dataset_split=dataset_split,
+        dataset_config_name=dataset_config_name,
     )
 
     dataloader_kwargs = {

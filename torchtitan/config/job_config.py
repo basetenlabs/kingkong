@@ -234,12 +234,36 @@ class DataLoader:
 @dataclass
 class Training:
     dataset: str = "c4_test"
-    """Dataset to use"""
+    """
+    Dataset to use. Can be:
+    - A registered dataset name (e.g., "c4", "c4_test", "c4_validation")
+    - A HuggingFace dataset path with "hf://" prefix (e.g., "hf://allenai/c4")
+      This allows loading any HuggingFace dataset without code changes.
+    """
 
     dataset_path: str | None = None
     """
     Path to the dataset in the file system. If provided, data will be
     loaded from this path instead of downloaded.
+    """
+
+    text_column: str = "text"
+    """
+    Column name containing text data in the dataset. Used when loading
+    custom HuggingFace datasets via the "hf://" prefix. Default is "text".
+    """
+
+    dataset_split: str = "train"
+    """
+    Dataset split to use (e.g., "train", "validation", "test").
+    Only used for custom HuggingFace datasets loaded via "hf://" prefix.
+    """
+
+    dataset_config_name: str | None = None
+    """
+    Optional dataset configuration name (subset) to load.
+    Only used for custom HuggingFace datasets loaded via "hf://" prefix.
+    For example, "en" for allenai/c4.
     """
 
     local_batch_size: int = 8
@@ -933,6 +957,24 @@ class Validation:
 
     dataset_path: str | None = None
     """Path to dataset to use for validation"""
+
+    text_column: str = "text"
+    """
+    Column name containing text data in the dataset. Used when loading
+    custom HuggingFace datasets via the "hf://" prefix. Default is "text".
+    """
+
+    dataset_split: str = "validation"
+    """
+    Dataset split to use (e.g., "train", "validation", "test").
+    Only used for custom HuggingFace datasets loaded via "hf://" prefix.
+    """
+
+    dataset_config_name: str | None = None
+    """
+    Optional dataset configuration name (subset) to load.
+    Only used for custom HuggingFace datasets loaded via "hf://" prefix.
+    """
 
     local_batch_size: int = 8
     """Batch size for validation"""

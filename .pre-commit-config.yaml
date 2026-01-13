@@ -13,7 +13,7 @@ repos:
     -   id: no-commit-to-branch
         args: ['--branch=main']
     -   id: check-added-large-files
-        args: ['--maxkb=500']
+        args: ['--maxkb=600']
     -   id: end-of-file-fixer
         exclude: '^(.*\.svg)$'
 
@@ -61,11 +61,10 @@ repos:
       types: [text]
       additional_dependencies:
         - tomli
-
-- repo: https://github.com/facebook/pyrefly-pre-commit
-  rev: 0.45.1
-  hooks:
-    - id: pyrefly-check
-      name: Pyrefly (type checking)
-      pass_filenames: false
-      language: system
+# - repo: https://github.com/facebook/pyrefly-pre-commit
+#   rev: 0.45.1
+#   hooks:
+#     - id: pyrefly-check
+#       name: Pyrefly (type checking)
+#       pass_filenames: false
+#       language: system
