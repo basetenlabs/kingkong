@@ -36,7 +36,7 @@ warmup_steps = 500  # lr scheduler warm up
 local_batch_size = 1
 seq_len = 2048
 max_norm = 1.0  # grad norm clipping
-steps = 500
+steps = 50
 dtype = "bfloat16"
 
 # Custom HuggingFace dataset - FineWeb (high-quality web text)
