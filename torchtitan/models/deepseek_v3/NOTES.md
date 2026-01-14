@@ -31,7 +31,7 @@ Use `train_configs/deepseek_aghilora.toml` with flavor `deepseek_aghilora`:
 - LoRA rank 16
 
 ```bash
-NGPU=8 CONFIG_FILE="./torchtitan/models/deepseek_v3/train_configs/deepseek_aghilora.toml" ./run_train.sh
+DEBUG=1 NGPU=8 CONFIG_FILE="./torchtitan/models/deepseek_v3/train_configs/deepseek_aghilora.toml" ./run_train.sh
 ```
 
 #### Option B: Full 671B Model (production)

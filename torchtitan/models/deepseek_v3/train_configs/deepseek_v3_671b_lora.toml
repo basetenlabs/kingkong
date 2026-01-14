@@ -23,6 +23,11 @@ flavor = "671B_lora"
 hf_assets_path = "./assets/hf/DeepSeek-V3.1-Base"
 # converters = ["float8"]
 
+[model.args]
+# Fine-tuning LoRA selection (optional):
+# Allowed values: ["wkv_a", "wkv_b", "wo"]
+finetune_lora_target_modules = ["wkv_a", "wkv_b", "wo"]
+
 [optimizer]
 name = "AdamW"
 lr = 2.2e-4

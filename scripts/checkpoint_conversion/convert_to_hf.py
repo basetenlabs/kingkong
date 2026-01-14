@@ -162,37 +162,88 @@ def merge_lora_weights(state_dict, model_args):
 # =============================================================================
 
 def convert_tt_to_hf_lora_path(prefix: str, base_relative: str) -> str:
-    """Convert TorchTitan layer path to HuggingFace path for LoRA adapters."""
+    """Convert TorchTitan layer path to HuggingFace path for DeepSeek-V3 LoRA adapters.
+
+    DeepSeek-V3 uses MLA (q_a_proj/q_b_proj and kv_a_proj_with_mqa/kv_b_proj) and an
+    MoE layout where experts live at:
+      model.layers.{layer}.mlp.experts.{expert}.{gate/up/down}_proj
+    """
     parts = prefix.split(".")
-    
-    if len(parts) >= 3 and parts[0] == "layers":
-        layer_idx = parts[1]
-        module_type = parts[2]
-        
-        if module_type == "attention":
+
+    if "layers" in parts:
+        layer_idx_idx = parts.index("layers") + 1
+        if layer_idx_idx >= len(parts):
+            logger.warning(f"[Path Mapping] Malformed prefix (missing layer idx): {prefix}")
+            return f"model.{prefix}.{base_relative}"
+
+        layer_idx = parts[layer_idx_idx]
+
+        # 1) Attention (MLA for DeepSeek-V3)
+        if "attention" in parts:
             proj_mapping = {
-                "wo": "o_proj", "wq": "q_proj", "wk": "k_proj", "wv": "v_proj",
-                "wqkv": "qkv_proj", "wq_a": "q_a_proj", "wq_b": "q_b_proj",
-                "wkv_a": "kv_a_proj_with_mqa", "wkv_b": "kv_b_proj",
+                "wo": "o_proj",
+                # MLA uses q_a_proj/q_b_proj; map legacy TT "wq" to q_b_proj so vLLM accepts it.
+                "wq": "q_b_proj",
+                "wq_a": "q_a_proj",
+                "wq_b": "q_b_proj",
+                "wkv_a": "kv_a_proj_with_mqa",
+                "wkv_b": "kv_b_proj",
+                # Keep these for completeness (may be unused for DeepSeek-V3).
+                "wk": "k_proj",
+                "wv": "v_proj",
+                "wqkv": "qkv_proj",
             }
             hf_proj = proj_mapping.get(base_relative, base_relative)
             if base_relative not in proj_mapping:
-                logger.warning(f"[Path Mapping] Unknown attention projection '{base_relative}'")
+                logger.warning(
+                    f"[Path Mapping] Unknown attention projection '{base_relative}'"
+                )
             return f"model.layers.{layer_idx}.self_attn.{hf_proj}"
-        
-        elif module_type in ("mlp", "feed_forward"):
+
+        # 2) MoE Experts (routed experts)
+        if "experts" in parts:
+            expert_idx_idx = parts.index("experts") + 1
+            if expert_idx_idx >= len(parts):
+                logger.warning(f"[Path Mapping] Malformed experts prefix: {prefix}")
+                return f"model.{prefix}.{base_relative}"
+
+            expert_idx = parts[expert_idx_idx]
+            if not expert_idx.isdigit():
+                # Some TT checkpoints store grouped experts without explicit expert indices.
+                # vLLM expects per-expert modules, so we can't map those keys reliably here.
+                logger.warning(
+                    f"[Path Mapping] Experts path missing numeric expert idx: {prefix}"
+                )
+                return f"model.{prefix}.{base_relative}"
+
             proj_mapping = {
-                "w1": "gate_proj", "w2": "down_proj", "w3": "up_proj",
-                "gate": "gate_proj", "down": "down_proj", "up": "up_proj",
+                "w1": "gate_proj",
+                "w2": "down_proj",
+                "w3": "up_proj",
+                "gate": "gate_proj",
+                "down": "down_proj",
+                "up": "up_proj",
+            }
+            hf_proj = proj_mapping.get(base_relative, base_relative)
+            if base_relative not in proj_mapping:
+                logger.warning(f"[Path Mapping] Unknown expert projection '{base_relative}'")
+            return f"model.layers.{layer_idx}.mlp.experts.{expert_idx}.{hf_proj}"
+
+        # 3) Standard MLP / Shared experts (Dense FFN path)
+        if "mlp" in parts or "feed_forward" in parts:
+            proj_mapping = {
+                "w1": "gate_proj",
+                "w2": "down_proj",
+                "w3": "up_proj",
+                "gate": "gate_proj",
+                "down": "down_proj",
+                "up": "up_proj",
             }
             hf_proj = proj_mapping.get(base_relative, base_relative)
             if base_relative not in proj_mapping:
                 logger.warning(f"[Path Mapping] Unknown MLP projection '{base_relative}'")
             return f"model.layers.{layer_idx}.mlp.{hf_proj}"
-        
-        else:
-            logger.warning(f"[Path Mapping] Unknown module type '{module_type}'")
-    
+
     logger.warning(f"[Path Mapping] Fallback: model.{prefix}.{base_relative}")
     return f"model.{prefix}.{base_relative}"
 
@@ -259,7 +310,7 @@ def extract_lora_adapters(state_dict, model_args):
         lora_b_weight = state_dict[lora_b_key]
         a_shape = tuple(lora_a_weight.shape)
         b_shape = tuple(lora_b_weight.shape)
-        
+
         # Convert to PEFT format
         peft_base_path = convert_tt_to_hf_lora_path(prefix, base_relative)
         peft_a_key = f"base_model.model.{peft_base_path}.lora_A.weight"

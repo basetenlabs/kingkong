@@ -8,6 +8,7 @@
 
 
 from dataclasses import dataclass, field
+from typing import List
 
 from torch import nn
 from torchtitan.config import JobConfig
@@ -67,6 +68,11 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
     # Expert parallel communication backend (set from config)
     expert_parallel_comm_backend: str = "standard"  # "standard" or "deepep"
 
+    # MoE implementation/backend used by MoE layers.
+    # Keep this as a real field (not dynamically added) so model construction / conversion
+    # doesn't fail when `update_from_config()` isn't called.
+    moe_impl: str = "standard"  # "standard" or "deepep"
+
     # Multi-Head Latent Attention (MLA)
     q_lora_rank: int = 0
     kv_lora_rank: int = 512
@@ -85,9 +91,19 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
     mscale: float = 1.0
 
     # Fine-tuning LoRA (distinct from MLA's latent compression)
-    # Set finetune_lora_rank > 0 to enable LoRA fine-tuning on attention output projection
+    # Set finetune_lora_rank > 0 to enable LoRA fine-tuning.
+    # Control which projections get LoRA via finetune_lora_target_modules.
     finetune_lora_rank: int = 0
     finetune_lora_alpha: float = 32.0
+    
+    # Allowed values: ["wkv_a", "wkv_b", "wo"]
+    finetune_lora_target_modules: List[str] = field(
+        default_factory=lambda: ["wkv_a", "wkv_b", "wo"]
+    )
+
+    @property
+    def is_lora_finetuning_enabled(self) -> bool:
+        return self.finetune_lora_rank > 0
 
     def update_from_config(self, job_config: JobConfig, **kwargs) -> None:
         seq_len = job_config.training.seq_len
@@ -115,6 +131,21 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
 
         # Configure expert parallel communication backend from config (defaults to "standard")
         self.moe_impl = job_config.parallelism.expert_parallel_comm_backend
+
+        # Validate fine-tuning LoRA target modules (if enabled).
+        if self.is_lora_finetuning_enabled:
+            allowed = {"wkv_a", "wkv_b", "wo"}
+            if not self.finetune_lora_target_modules:
+                raise ValueError(
+                    "finetune_lora_target_modules must be non-empty when finetune_lora_rank > 0. "
+                    f"Allowed values: {sorted(allowed)}"
+                )
+            invalid = set(self.finetune_lora_target_modules) - allowed
+            if invalid:
+                raise ValueError(
+                    f"Unknown finetune_lora_target_modules: {sorted(invalid)}. "
+                    f"Allowed values: {sorted(allowed)}"
+                )
 
     def get_nparams_and_flops(self, model: nn.Module, seq_len: int) -> tuple[int, int]:
         return get_moe_model_nparams_and_flops(

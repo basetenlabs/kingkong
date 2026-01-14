@@ -37,6 +37,35 @@ from torchtitan.tools.profiling import (
     maybe_enable_profiling,
 )
 
+def _apply_model_args_overrides(
+    model_args: Any, overrides: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Apply flat `model.args` overrides onto a model-args object.
+
+    - Unknown keys are rejected (must already exist on `model_args`).
+    - Nested dict overrides are intentionally unsupported for now (keep it simple).
+    - Returns a list of changes for logging: [{"key": "...", "old": ..., "new": ...}, ...]
+    """
+
+    changed: list[dict[str, Any]] = []
+
+    for key, value in overrides.items():
+        if isinstance(value, dict):
+            raise ValueError(
+                f"Nested model arg override '{key}' is not supported (expected a scalar)"
+            )
+        if not hasattr(model_args, key):
+            raise ValueError(
+                f"Unknown model arg override '{key}' for {type(model_args).__name__}"
+            )
+
+        cur = getattr(model_args, key)
+        if cur != value:
+            changed.append({"key": key, "old": cur, "new": value})
+        setattr(model_args, key, value)
+
+    return changed
+
 
 def maybe_launch_debugger() -> None:
     """Launch debugpy debugger if DEBUG or DEBUGPY environment variable is set.
@@ -210,6 +239,17 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         # build model (using meta init)
         model_args = self.train_spec.model_args[job_config.model.flavor]
+        
+        # Apply optional per-run model-args overrides from TOML/CLI.
+        # These overrides are applied before update_from_config() so that fields derived from
+        # training config (e.g., max_seq_len from training.seq_len) can still take precedence.
+        if job_config.model.args:
+            overridden = _apply_model_args_overrides(model_args, job_config.model.args)
+            if overridden:
+                logger.info(
+                    "[Config] Applied model.args overrides:\n"
+                    + json.dumps(overridden, indent=2, ensure_ascii=False, default=str)
+                )
         # set the model args from training job configs
         model_args.update_from_config(job_config)
         self.model_args = model_args

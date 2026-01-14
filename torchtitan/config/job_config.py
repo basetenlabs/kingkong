@@ -129,6 +129,19 @@ class Model:
     converters have been applied.
     """
 
+    args: dict[str, Any] = field(default_factory=dict)
+    """
+    Optional per-run overrides for the selected model flavor's ModelArgs.
+
+    This is intentionally a free-form dict so each model can expose its own knobs
+    without requiring JobConfig schema changes.
+
+    Example (TOML):
+        [model.args]
+        finetune_lora_rank = 16
+        finetune_lora_target_modules = ["wq", "wkv_a", "wkv_b", "wo"]
+    """
+
 
 @dataclass
 class Optimizer:
