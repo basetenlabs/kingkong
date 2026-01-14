@@ -206,10 +206,52 @@ class Attention(nn.Module):
         self.n_heads = model_args.n_heads
         self.q_lora_rank = model_args.q_lora_rank
         self.kv_lora_rank = model_args.kv_lora_rank
+        self.finetune_lora_rank = model_args.finetune_lora_rank
+        self.finetune_lora_alpha = model_args.finetune_lora_alpha
+        self.finetune_lora_target_modules = set(model_args.finetune_lora_target_modules)
+        self.is_lora_finetuning_enabled = model_args.is_lora_finetuning_enabled
         self.qk_nope_head_dim = model_args.qk_nope_head_dim
         self.qk_rope_head_dim = model_args.qk_rope_head_dim
         self.qk_head_dim = model_args.qk_nope_head_dim + model_args.qk_rope_head_dim
         self.v_head_dim = model_args.v_head_dim
+
+        self.finetune_lora_wq: LoRALinear | None = None
+        self.finetune_lora_wkv_a: LoRALinear | None = None
+        self.finetune_lora_wkv_b: LoRALinear | None = None
+        if self.is_lora_finetuning_enabled and "wq" in self.finetune_lora_target_modules:
+            self.finetune_lora_wq = LoRALinear(
+                in_features=self.dim,
+                out_features=self.n_heads * self.qk_head_dim,
+                rank=self.finetune_lora_rank,
+                alpha=self.finetune_lora_alpha,
+            )
+
+        # LoRA for KV projections:
+        # - wkv_a produces [kv_latent, k_rope_part]. We apply LoRA only to kv_latent
+        #   to avoid perturbing the RoPE-only projection by default.
+        # - wkv_b projects kv_latent -> [k_nope, v] (flattened).
+        if (
+            self.is_lora_finetuning_enabled
+            and self.kv_lora_rank > 0
+            and "wkv_a" in self.finetune_lora_target_modules
+        ):
+            self.finetune_lora_wkv_a = LoRALinear(
+                in_features=self.dim,
+                out_features=self.kv_lora_rank,
+                rank=self.finetune_lora_rank,
+                alpha=self.finetune_lora_alpha,
+            )
+        if (
+            self.is_lora_finetuning_enabled
+            and self.kv_lora_rank > 0
+            and "wkv_b" in self.finetune_lora_target_modules
+        ):
+            self.finetune_lora_wkv_b = LoRALinear(
+                in_features=self.kv_lora_rank,
+                out_features=self.n_heads * (self.qk_nope_head_dim + self.v_head_dim),
+                rank=self.finetune_lora_rank,
+                alpha=self.finetune_lora_alpha,
+            )
 
         if self.q_lora_rank == 0:
             self.wq = nn.Linear(self.dim, self.n_heads * self.qk_head_dim, bias=False)
@@ -229,16 +271,16 @@ class Attention(nn.Module):
             bias=False,
         )
         self.wo = nn.Linear(self.n_heads * self.v_head_dim, self.dim, bias=False)
-         # Fine-tuning LoRA on output projection (wo)
-        # This is a parallel LoRA where lora_B @ lora_A has the same shape as wo
+        
         self.finetune_lora_wo: LoRALinear | None = None
-        if model_args.finetune_lora_rank > 0:
+        if self.is_lora_finetuning_enabled and "wo" in self.finetune_lora_target_modules:
             self.finetune_lora_wo = LoRALinear(
                 in_features=self.n_heads * self.v_head_dim,
                 out_features=self.dim,
-                rank=model_args.finetune_lora_rank,
-                alpha=model_args.finetune_lora_alpha,
+                rank=self.finetune_lora_rank,
+                alpha=self.finetune_lora_alpha,
             )
+        
         self.softmax_scale = self.qk_head_dim**-0.5
 
         if model_args.max_seq_len > model_args.original_seq_len:
@@ -284,6 +326,8 @@ class Attention(nn.Module):
         else:
             q = self.wq_a(x)
             q = self.wq_b(self.q_norm(q))
+        if self.finetune_lora_wq is not None:
+            q = q + self.finetune_lora_wq(x)
         # Use -1 instead of `n_heads` (or `n_kv_heads`) to infer the actual
         # local heads from sizes of q and kv as TP may have sharded them after
         # the above linear ops.
@@ -297,19 +341,26 @@ class Attention(nn.Module):
         # Key-value projection
         kv = self.wkv_a(x)  # (bsz, seqlen, kv_lora_rank + qk_rope_head_dim)
         kv, k_pe = torch.split(kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+        if self.finetune_lora_wkv_a is not None:
+            kv = kv + self.finetune_lora_wkv_a(x)
 
         k_pe = apply_rotary_emb(
             k_pe.unsqueeze(2), freqs_cis, positions
         )  # (bsz, seqlen, 1, qk_rope_head_dim)
 
+        kv_latent = self.kv_norm(kv)
         kv = self.wkv_b(
-            self.kv_norm(kv)
+            kv_latent
         )  # (bsz, seqlen, n_heads * (qk_nope_head_dim + v_head_dim))
+        if self.finetune_lora_wkv_b is not None:
+            kv = kv + self.finetune_lora_wkv_b(kv_latent)
         kv = kv.view(bsz, seqlen, -1, self.qk_nope_head_dim + self.v_head_dim)
         k_nope, v = torch.split(kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
         k = torch.cat(
             [k_nope, k_pe.expand(-1, -1, self.n_heads, -1)], dim=-1
         )  # (bsz, seqlen, n_heads, qk_head_dim)
+
+        
 
         q = q.transpose(1, 2)  # (bsz, n_heads, seqlen, qk_head_dim)
         k = k.transpose(1, 2)  # (bsz, n_heads, seqlen, qk_head_dim)
@@ -353,8 +404,15 @@ class Attention(nn.Module):
         nn.init.trunc_normal_(self.wo.weight, mean=0.0, std=init_std)
 
          # Initialize fine-tuning LoRA adapter
-        if self.finetune_lora_wo is not None:
-            self.finetune_lora_wo.init_weights()
+        finetune_loras = [
+            self.finetune_lora_wq,
+            self.finetune_lora_wkv_a,
+            self.finetune_lora_wkv_b,
+            self.finetune_lora_wo,
+        ]
+        for lora in finetune_loras:
+            if lora is not None:
+                lora.init_weights()
 
         self.kv_norm.reset_parameters()
         if self.q_lora_rank > 0:
@@ -475,7 +533,7 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
                 b=cutoff_factor * final_out_std,
             )
         
-        if self.model_args.finetune_lora_rank > 0:
+        if self.model_args.is_lora_finetuning_enabled:
             self.freeze_for_finetuning()
         
     

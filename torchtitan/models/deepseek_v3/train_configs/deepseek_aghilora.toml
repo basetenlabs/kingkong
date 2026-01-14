@@ -75,3 +75,8 @@ filter_fqns = ["output", "router.gate"]
 
 [quantize.grouped_mm.float8]
 fqns = ["experts"]
+
+[model.args]
+# Fine-tuning LoRA selection (optional):
+# Allowed values: ["wq", "wkv_a", "wkv_b", "wo"]
+finetune_lora_target_modules = ["wq", "wkv_a", "wkv_b", "wo"]
