@@ -433,6 +433,12 @@ class CheckpointManager:
                 fqn_to_index_mapping=self.sd_adapter.fqn_to_index_mapping,
                 num_threads=5,
             )
+        
+        # Copy over HF config files useful in creating a complete HF checkpoint
+        if to_hf and self.sd_adapter is not None:
+            if dist.get_rank() == 0:
+                self.sd_adapter.copy_hf_assets_to_checkpoint(checkpoint_id)
+            dist.barrier()
 
         if enable_garbage_collection:
             GarbageCollection.collect("GC collection invoked by checkpointer.")
