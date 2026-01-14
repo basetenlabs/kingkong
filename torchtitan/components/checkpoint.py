@@ -422,6 +422,7 @@ class CheckpointManager:
                 state_dict,
                 storage_writer=storage_writer,
                 checkpoint_id=checkpoint_save_id,
+                use_collectives=True,
             )
 
         # pyrefly: ignore [missing-attribute]
