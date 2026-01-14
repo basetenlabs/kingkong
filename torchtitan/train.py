@@ -31,6 +31,7 @@ from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.protocols.model_converter import build_model_converters
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
+from torchtitan.tools.debugger import maybe_launch_debugger
 from torchtitan.tools.profiling import (
     maybe_enable_memory_snapshot,
     maybe_enable_profiling,

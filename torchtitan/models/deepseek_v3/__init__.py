@@ -151,8 +151,98 @@ deepseekv3_args = {
         qk_nope_head_dim=128,
         qk_rope_head_dim=64,
         v_head_dim=128,
+        attn_type="sdpa",
+        attn_mask_type="block_causal",
+    ),
+    # 671B with LoRA fine-tuning enabled
+    "671B_lora": DeepSeekV3ModelArgs(
+        vocab_size=129280,
+        dim=7168,
+        inter_dim=18432,
+        moe_inter_dim=2048,
+        n_layers=61,
+        n_dense_layers=3,
+        n_heads=128,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            num_expert_groups=8,
+            num_limited_groups=4,
+            score_func="sigmoid",
+            route_norm=True,
+            route_scale=2.5,
+            score_before_experts=False,
+        ),
+        q_lora_rank=1536,
+        kv_lora_rank=512,
+        qk_nope_head_dim=128,
+        qk_rope_head_dim=64,
+        v_head_dim=128,
         attn_type="flex",
         attn_mask_type="block_causal",
+        # Fine-tuning LoRA (for parameter-efficient fine-tuning)
+        finetune_lora_rank=16,
+        finetune_lora_alpha=32.0,
+    ),
+    "deepseek_aghi": DeepSeekV3ModelArgs(
+        vocab_size=129280,
+        dim=7168,
+        inter_dim=18432,
+        moe_inter_dim=2048,
+        n_layers=2,
+        n_dense_layers=3,
+        n_heads=128,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            num_expert_groups=8,
+            num_limited_groups=4,
+            score_func="sigmoid",
+            route_norm=True,
+            route_scale=2.5,
+            score_before_experts=False,
+        ),
+        q_lora_rank=1536,
+        kv_lora_rank=512,
+        qk_nope_head_dim=128,
+        qk_rope_head_dim=64,
+        v_head_dim=128,
+        attn_type="flex",
+        attn_mask_type="block_causal",
+    ),
+    # Custom flavor with adjustable LoRA ranks for MLA
+    "deepseek_aghilora": DeepSeekV3ModelArgs(
+        vocab_size=129280,
+        dim=7168,
+        inter_dim=18432,
+        moe_inter_dim=2048,
+        n_layers=2, # 1 Dense, 1 Moe (n_layers - n_dense_layers)
+        n_dense_layers=1,
+        n_heads=128,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            num_expert_groups=8,
+            num_limited_groups=4,
+            score_func="sigmoid",
+            route_norm=True,
+            route_scale=2.5,
+            score_before_experts=False,
+        ),
+        # MLA LoRA ranks - adjust these as needed
+        q_lora_rank=1536,   # 0 = no low-rank Q projection, >0 = use low-rank
+        kv_lora_rank=512,   # Low-rank dimension for KV projections
+        qk_nope_head_dim=128,
+        qk_rope_head_dim=64,
+        v_head_dim=128,
+        attn_type="sdpa",
+        attn_mask_type="block_causal",
+        # Fine-tuning LoRA (for parameter-efficient fine-tuning)
+        finetune_lora_rank=16,    # 0 = disabled, >0 = enable LoRA fine-tuning
+        finetune_lora_alpha=32.0,  # LoRA scaling factor
     ),
 }
 
