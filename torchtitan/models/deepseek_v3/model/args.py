@@ -68,6 +68,11 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
     # Expert parallel communication backend (set from config)
     expert_parallel_comm_backend: str = "standard"  # "standard" or "deepep"
 
+    # MoE implementation/backend used by MoE layers.
+    # Keep this as a real field (not dynamically added) so model construction / conversion
+    # doesn't fail when `update_from_config()` isn't called.
+    moe_impl: str = "standard"  # "standard" or "deepep"
+
     # Multi-Head Latent Attention (MLA)
     q_lora_rank: int = 0
     kv_lora_rank: int = 512
@@ -91,9 +96,9 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
     finetune_lora_rank: int = 0
     finetune_lora_alpha: float = 32.0
     
-    # Allowed values: ["wq", "wkv_a", "wkv_b", "wo"]
+    # Allowed values: ["wkv_a", "wkv_b", "wo"]
     finetune_lora_target_modules: List[str] = field(
-        default_factory=lambda: ["wq", "wkv_a", "wkv_b", "wo"]
+        default_factory=lambda: ["wkv_a", "wkv_b", "wo"]
     )
 
     @property
@@ -129,7 +134,7 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
 
         # Validate fine-tuning LoRA target modules (if enabled).
         if self.is_lora_finetuning_enabled:
-            allowed = {"wq", "wkv_a", "wkv_b", "wo"}
+            allowed = {"wkv_a", "wkv_b", "wo"}
             if not self.finetune_lora_target_modules:
                 raise ValueError(
                     "finetune_lora_target_modules must be non-empty when finetune_lora_rank > 0. "

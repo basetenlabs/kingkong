@@ -25,8 +25,8 @@ hf_assets_path = "./assets/hf/DeepSeek-V3.1-Base"
 
 [model.args]
 # Fine-tuning LoRA selection (optional):
-# Allowed values: ["wq", "wkv_a", "wkv_b", "wo"]
-finetune_lora_target_modules = ["wq", "wkv_a", "wkv_b", "wo"]
+# Allowed values: ["wkv_a", "wkv_b", "wo"]
+finetune_lora_target_modules = ["wkv_a", "wkv_b", "wo"]
 
 [optimizer]
 name = "AdamW"

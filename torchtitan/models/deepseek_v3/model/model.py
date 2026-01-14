@@ -215,16 +215,11 @@ class Attention(nn.Module):
         self.qk_head_dim = model_args.qk_nope_head_dim + model_args.qk_rope_head_dim
         self.v_head_dim = model_args.v_head_dim
 
-        self.finetune_lora_wq: LoRALinear | None = None
+        # NOTE (DeepSeek-V3 / MLA): when q_lora_rank > 0, "wq" is split into wq_a and wq_b,
+        # so a single "wq LoRA" won't match HF/vLLM shapes/names. Proper support needs LoRA on
+        # wq_a and/or wq_b (plus checkpoint naming/export updates).
         self.finetune_lora_wkv_a: LoRALinear | None = None
         self.finetune_lora_wkv_b: LoRALinear | None = None
-        if self.is_lora_finetuning_enabled and "wq" in self.finetune_lora_target_modules:
-            self.finetune_lora_wq = LoRALinear(
-                in_features=self.dim,
-                out_features=self.n_heads * self.qk_head_dim,
-                rank=self.finetune_lora_rank,
-                alpha=self.finetune_lora_alpha,
-            )
 
         # LoRA for KV projections:
         # - wkv_a produces [kv_latent, k_rope_part]. We apply LoRA only to kv_latent
@@ -326,8 +321,6 @@ class Attention(nn.Module):
         else:
             q = self.wq_a(x)
             q = self.wq_b(self.q_norm(q))
-        if self.finetune_lora_wq is not None:
-            q = q + self.finetune_lora_wq(x)
         # Use -1 instead of `n_heads` (or `n_kv_heads`) to infer the actual
         # local heads from sizes of q and kv as TP may have sharded them after
         # the above linear ops.
@@ -405,7 +398,6 @@ class Attention(nn.Module):
 
          # Initialize fine-tuning LoRA adapter
         finetune_loras = [
-            self.finetune_lora_wq,
             self.finetune_lora_wkv_a,
             self.finetune_lora_wkv_b,
             self.finetune_lora_wo,
@@ -433,11 +425,16 @@ class TransformerBlock(nn.Module):
 
         self.moe_enabled = layer_id >= model_args.n_dense_layers
         if self.moe_enabled:
+            moe_impl = getattr(
+                model_args,
+                "moe_impl",
+                getattr(model_args, "expert_parallel_comm_backend", "standard"),
+            )
             self.moe = build_moe(
                 args=model_args.moe_args,
                 dim=model_args.dim,
                 hidden_dim=model_args.moe_inter_dim,
-                moe_impl=model_args.moe_impl,
+                moe_impl=moe_impl,
             )
         else:
             self.feed_forward = FeedForward(model_args.dim, model_args.inter_dim)
