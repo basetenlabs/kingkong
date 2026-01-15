@@ -288,8 +288,14 @@ class MoEStateDictAdapter(StateDictAdapter):
 
         sorted_expert_ids = sorted(experts.keys())
         sorted_experts = [experts[i] for i in sorted_expert_ids]
-        # pyrefly: ignore [missing-attribute]
-        local_tensor = torch.stack(sorted_experts, dim=0)._local_tensor
+        # IMPORTANT: `sorted_experts` are DTensors when loading from HF via DCP.
+        # Doing `torch.stack()` on DTensors can trigger DTensor propagation /
+        # implicit collectives, causing huge transient allocations (OOM) during load.
+        # Instead, stack ONLY the already-local shards and then re-wrap.
+        local_expert_locals = [
+            (t._local_tensor if isinstance(t, DTensor) else t) for t in sorted_experts
+        ]
+        local_tensor = torch.stack(local_expert_locals, dim=0)
 
         assert (
             abstract_key in self.grouped_expert_weight_placements
