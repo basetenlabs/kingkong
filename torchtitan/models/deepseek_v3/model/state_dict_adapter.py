@@ -185,15 +185,42 @@ class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
         1. When loading from HF checkpoint, dequantize the weights from float8 to float32.
         2. Convert between the HF shape and the torchtitan shape.
         3. Concat separate expert's weight into GroupedExperts' weight.
+
+        NOTE: This function destructively modifies hf_state_dict to free memory
+        as weights are processed. This is intentional for memory efficiency with
+        large models like DeepSeek-V3.
         """
+        import gc
 
         state_dict = {}
         expert_weights_by_layer = {}  # {layer: {abstract_key: {expert_id: tensor}}}
 
-        for key, value in hf_state_dict.items():
+        # Iterate over a copy of keys so we can delete from dict during iteration
+        # Sort keys to process layer-by-layer and group experts by weight type,
+        # minimizing memory from partial accumulations
+        def get_sort_key(key: str) -> tuple:
+            layer_match = re.search(r"layers\.(\d+)", key)
+            layer_num = int(layer_match.group(1)) if layer_match else -1
+            # Extract weight type (gate_proj, up_proj, down_proj) for grouping
+            weight_type = ""
+            if "gate_proj" in key:
+                weight_type = "gate_proj"
+            elif "up_proj" in key:
+                weight_type = "up_proj"
+            elif "down_proj" in key:
+                weight_type = "down_proj"
+            return (layer_num, weight_type, key)
+
+        all_keys = sorted(hf_state_dict.keys(), key=get_sort_key)
+        processed_count = 0
+
+        for key in all_keys:
+            value = hf_state_dict[key]
+
             if "mlp.experts" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=2)
                 if abstract_key not in self.from_hf_map:
+                    del hf_state_dict[key]
                     continue
                 layer_num, expert_num = re.findall(r"\d+", key)
                 titan_abstract_key = self.from_hf_map[abstract_key]
@@ -227,20 +254,34 @@ class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
                 if stacked_value is not None:
                     state_dict[new_key] = stacked_value
 
+                # Delete from hf_state_dict to free memory incrementally
+                del hf_state_dict[key]
+
             elif "layers" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
                 if abstract_key not in self.from_hf_map:
+                    del hf_state_dict[key]
                     continue
                 # pyrefly: ignore [missing-attribute]
                 layer_num = re.search(r"\d+", key).group(0)
                 new_key = self.from_hf_map[abstract_key]
                 new_key = new_key.format(layer_num)
                 state_dict[new_key] = value
+                del hf_state_dict[key]
 
             else:
                 if key not in self.from_hf_map:
+                    del hf_state_dict[key]
                     continue
                 new_key = self.from_hf_map[key]
                 state_dict[new_key] = value
+                del hf_state_dict[key]
+
+            # Periodically trigger garbage collection to free GPU memory
+            processed_count += 1
+            if processed_count % 1000 == 0:
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         return state_dict
