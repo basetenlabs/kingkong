@@ -64,6 +64,7 @@ interval = 50
 last_save_model_only = true
 export_dtype = "bfloat16"  # Valid options: "float16", "bfloat16", "float32"
 async_mode = "disabled"  # ["disabled", "async", "async_with_pinned_mem]"
+initial_load_in_hf = true
 last_save_in_hf = false
 
 [activation_checkpoint]

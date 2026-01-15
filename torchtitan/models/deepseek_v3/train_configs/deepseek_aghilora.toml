@@ -57,6 +57,7 @@ enable = true
 folder = "checkpoint"
 interval = 50
 last_save_model_only = false
+initial_load_in_hf = true
 export_dtype = "float16"
 async_mode = "disabled"  # ["disabled", "async", "async_with_pinned_mem]"
 
