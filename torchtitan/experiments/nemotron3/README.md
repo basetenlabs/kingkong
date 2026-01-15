@@ -55,8 +55,78 @@ NGPU=1 CONFIG_FILE="./torchtitan/experiments/nemotron3/train_configs/debug_model
 
 | Config | Description | Use Case |
 |--------|-------------|----------|
-| `nemotron3-nano-30B.toml` | Full Nemotron3 Nano-30B model with bf16 |  |
-| `debug_model.toml` | Small 16-layer model | testing & debugging |
+| `nemotron3-nano-30B.toml` | Full Nemotron3 Nano-30B model with bf16 | Pretraining |
+| `nemotron3-nano-30B-sft.toml` | Supervised Fine-Tuning config | Instruction tuning on chat data |
+| `nemotron3-nano-30B-cpt.toml` | Continued Pre-Training config | Domain adaptation on text corpora |
+| `debug_model.toml` | Small 16-layer model | Testing & debugging |
+
+## Finetuning
+
+This implementation supports two finetuning modes:
+
+### Supervised Fine-Tuning (SFT)
+
+Train only on assistant responses while masking user messages. Perfect for instruction tuning.
+
+```bash
+NGPU=8 CONFIG_FILE="./torchtitan/experiments/nemotron3/train_configs/nemotron3-nano-30B-sft.toml" ./run_train.sh
+```
+
+**Dataset Format** (messages format):
+```json
+{
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What is 2+2?"},
+    {"role": "assistant", "content": "2+2 equals 4."}
+  ]
+}
+```
+
+Key config options for SFT:
+```toml
+[training]
+dataset_format = "messages"           # Use chat format
+document_packing = true               # Pack multiple conversations
+chat_start_sequence = "<|im_start|>assistant\n"  # Start of assistant turn
+chat_end_sequence = "<|im_end|>"      # End of assistant turn
+```
+
+### Continued Pre-Training (CPT)
+
+Train on all tokens in a text corpus. Perfect for domain adaptation.
+
+```bash
+NGPU=8 CONFIG_FILE="./torchtitan/experiments/nemotron3/train_configs/nemotron3-nano-30B-cpt.toml" ./run_train.sh
+```
+
+**Dataset Format** (text format):
+```json
+{"text": "Your domain-specific text goes here..."}
+```
+
+Key config options for CPT:
+```toml
+[training]
+dataset_format = "text"               # Use text format
+document_packing = true               # Pack documents for efficiency
+text_column = "text"                  # Column containing text
+```
+
+### Custom Datasets
+
+You can use any HuggingFace dataset or local JSONL file:
+
+```toml
+[training]
+# HuggingFace dataset
+dataset = "hf://your-org/your-dataset"
+datasource = "huggingface"
+
+# Or local JSONL file
+dataset = "/path/to/your/data.jsonl"
+datasource = "local_jsonl"
+```
 
 ## Key Training Options
 

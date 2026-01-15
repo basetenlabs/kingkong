@@ -8,7 +8,22 @@ from dataclasses import dataclass
 from typing import Callable
 
 
-__all__ = ["DatasetConfig"]
+__all__ = [
+    "DatasetConfig",
+    # Chat template utilities
+    "ChatTemplate",
+    "HfTokenizerWithPadToken",
+    "MessageRow",
+    "TokensAndMask",
+    "tokenize_and_mask",
+    "tokenize_no_mask",
+    # Finetuning datasets
+    "HuggingFaceStream",
+    "PackedSequencesDataset",
+    "SingleSequenceDataset",
+    "build_finetune_dataloader",
+    "build_finetune_tokenizer",
+]
 
 
 @dataclass
@@ -16,3 +31,23 @@ class DatasetConfig:
     path: str
     loader: Callable
     sample_processor: Callable
+
+
+# Import chat template utilities
+from torchtitan.hf_datasets.chat_template import (
+    ChatTemplate,
+    HfTokenizerWithPadToken,
+    MessageRow,
+    TokensAndMask,
+    tokenize_and_mask,
+    tokenize_no_mask,
+)
+
+# Import finetuning datasets
+from torchtitan.hf_datasets.finetune_datasets import (
+    HuggingFaceStream,
+    PackedSequencesDataset,
+    SingleSequenceDataset,
+    build_finetune_dataloader,
+    build_finetune_tokenizer,
+)

@@ -1,0 +1,94 @@
+# Continued Pre-Training (CPT) config for NemotronH-nano-30B
+# This config trains on all tokens in the text (no masking).
+# Use for domain adaptation on new text corpora.
+#
+# Dataset Requirements:
+# The dataset must have a "text" field containing raw text.
+
+[job]
+dump_folder = "./outputs/cpt"
+description = "Nemotron3 Nano 30B - Continued Pre-Training"
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 100
+
+[metrics]
+log_freq = 10
+enable_tensorboard = true
+save_tb_folder = "tb"
+enable_wandb = true
+
+[model]
+name = "nemotron3"
+flavor = "nano-30B"
+hf_assets_path = "/root/.cache/team_artifacts/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+
+[optimizer]
+name = "AdamW"
+lr = 1e-5  # Very low LR for continued pretraining
+eps = 1e-8
+weight_decay = 0.1
+
+[lr_scheduler]
+warmup_steps = 200
+decay_type = "cosine"
+
+[training]
+local_batch_size = 1
+seq_len = 4096
+max_norm = 1.0
+steps = 5000
+dtype = "bfloat16"
+
+# ============ FINETUNING CONFIGURATION ============
+# Dataset in text format (raw text for continued pretraining)
+dataset = "hf://HuggingFaceFW/fineweb"
+dataset_split = "train"
+dataset_config_name = "sample-10BT"
+text_column = "text"
+dataset_format = "text"  # Use text format for CPT
+
+# Document packing - pack multiple documents into one sequence
+document_packing = true
+
+# Infinite dataloader
+infinite_dataloader = true
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+fsdp_reshard_after_forward = "default"
+tensor_parallel_degree = 1
+context_parallel_degree = 1
+
+[checkpoint]
+enable = true
+folder = "checkpoint"
+interval = 500
+last_save_model_only = true
+last_save_in_hf = true
+export_dtype = "bfloat16"
+async_mode = "disabled"
+
+# Load pretrained weights
+initial_load_path = "/root/.cache/team_artifacts/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+initial_load_in_hf = true
+initial_load_model_only = true
+
+[activation_checkpoint]
+mode = "full"
+selective_ac_option = "op"
+
+[compile]
+enable = true
+components = ["model", "loss"]
+
+[quantize.linear.float8]
+enable_fsdp_float8_all_gather = false
+precompute_float8_dynamic_scale_for_fsdp = false
+filter_fqns = ["output"]
+
+[validation]
+enable = false

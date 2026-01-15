@@ -1,0 +1,103 @@
+# Supervised Fine-Tuning (SFT) config for NemotronH-nano-30B
+# This config trains only on assistant responses, masking out user messages.
+# Use with: torchrun --nproc_per_node=8 train.py --config.file=<this_file>
+#
+# Dataset Requirements:
+# The dataset must have a "messages" field with OpenAI-style chat format:
+# [
+#   {"role": "system", "content": "You are a helpful assistant."},
+#   {"role": "user", "content": "Hello!"},
+#   {"role": "assistant", "content": "Hi there! How can I help you today?"}
+# ]
+
+[job]
+dump_folder = "./outputs/sft"
+description = "Nemotron3 Nano 30B - Supervised Fine-Tuning"
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 100
+
+[metrics]
+log_freq = 10
+enable_tensorboard = true
+save_tb_folder = "tb"
+enable_wandb = true
+
+[model]
+name = "nemotron3"
+flavor = "nano-30B"
+hf_assets_path = "/root/.cache/team_artifacts/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+
+[optimizer]
+name = "AdamW"
+lr = 2e-5  # Lower LR for finetuning
+eps = 1e-8
+weight_decay = 0.01
+
+[lr_scheduler]
+warmup_steps = 100
+decay_type = "cosine"
+
+[training]
+local_batch_size = 1
+seq_len = 8192  # Keeps ~69% of data (median is 2344, mean is 3614)
+max_norm = 1.0
+steps = 1000
+dtype = "bfloat16"
+
+# ============ FINETUNING CONFIGURATION ============
+# Official NVIDIA Nemotron Instruction-Following Dataset
+# Designed specifically for Nemotron model finetuning
+dataset = "hf://nvidia/Nemotron-Instruction-Following-Chat-v1"
+dataset_split = "chat_if"
+dataset_format = "messages"  # Use messages format for SFT
+
+# Document packing - pack multiple conversations into one sequence
+document_packing = true
+
+# Chat template configuration (Nemotron format with think tags)
+# The model uses <think></think> before content, so we train starting after </think>
+chat_start_sequence = "</think>"
+chat_end_sequence = "<|im_end|>"
+
+# Infinite dataloader to loop through dataset
+infinite_dataloader = true
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+fsdp_reshard_after_forward = "default"
+tensor_parallel_degree = 1
+context_parallel_degree = 1
+
+[checkpoint]
+enable = true
+folder = "checkpoint"
+interval = 100
+last_save_model_only = true
+last_save_in_hf = true
+export_dtype = "bfloat16"
+async_mode = "disabled"
+
+# Load pretrained weights
+initial_load_path = "/root/.cache/team_artifacts/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+initial_load_in_hf = true
+initial_load_model_only = true
+
+[activation_checkpoint]
+mode = "full"
+selective_ac_option = "op"
+
+[compile]
+enable = false  # Disabled to save memory with longer sequences
+components = ["model", "loss"]
+
+[quantize.linear.float8]
+enable_fsdp_float8_all_gather = false
+precompute_float8_dynamic_scale_for_fsdp = false
+filter_fqns = ["output"]
+
+[validation]
+enable = false
