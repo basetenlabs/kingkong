@@ -287,18 +287,53 @@ class MoEStateDictAdapter(StateDictAdapter):
             return None
 
         sorted_expert_ids = sorted(experts.keys())
-        sorted_experts = [experts[i] for i in sorted_expert_ids]
 
+        # IMPORTANT: Memory-efficient stacking for large MoE models (e.g., DeepSeek-V3 671B).
+        # We must free individual expert tensors BEFORE allocating the stacked tensor
+        # to avoid holding 2x the memory during the stack operation.
+        #
+        # Strategy: Pre-allocate output tensor, copy each expert slice-by-slice,
+        # and delete the original expert immediately after copying.
+        # This ensures we never hold both the individual experts AND the stacked tensor.
+        #
+        # `sorted_experts` are DTensors when loading from HF via DCP.
+        # We extract ONLY the local shards to avoid DTensor collective overhead.
 
-        # IMPORTANT: `sorted_experts` are DTensors when loading from HF via DCP.
-        # Doing `torch.stack()` on DTensors can trigger DTensor propagation /
-        # implicit collectives, causing huge transient allocations (OOM) during load.
-        # Instead, stack ONLY the already-local shards and then re-wrap.
-        local_expert_locals = [
-            (t._local_tensor if isinstance(t, DTensor) else t) for t in sorted_experts
-        ]
-        local_tensor = torch.stack(local_expert_locals, dim=0)
+        import gc
 
+        # Get first expert to determine shape and dtype
+        first_expert_id = sorted_expert_ids[0]
+        first_t = experts[first_expert_id]
+        first_local = first_t._local_tensor if isinstance(first_t, DTensor) else first_t
+        expert_shape = first_local.shape
+        expert_dtype = first_local.dtype
+        expert_device = first_local.device
+        num_experts = len(sorted_expert_ids)
+
+        # Pre-allocate output tensor
+        local_tensor = torch.empty(
+            (num_experts, *expert_shape),
+            dtype=expert_dtype,
+            device=expert_device,
+        )
+
+        # Copy each expert and immediately free it
+        for idx, expert_id in enumerate(sorted_expert_ids):
+            t = experts[expert_id]
+            local_t = t._local_tensor if isinstance(t, DTensor) else t
+            local_tensor[idx].copy_(local_t)
+            # Immediately delete from dictionary to free memory
+            del experts[expert_id]
+
+        # Clean up the layer entry
+        del expert_weights_by_layer[layer_num][abstract_key]
+        if not expert_weights_by_layer[layer_num]:
+            del expert_weights_by_layer[layer_num]
+
+        # Force GC to reclaim any remaining memory
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         assert (
             abstract_key in self.grouped_expert_weight_placements
@@ -311,10 +346,6 @@ class MoEStateDictAdapter(StateDictAdapter):
             self.grouped_expert_weight_placements[abstract_key],
             run_check=False,
         )
-
-        del expert_weights_by_layer[layer_num][abstract_key]
-        if not expert_weights_by_layer[layer_num]:
-            del expert_weights_by_layer[layer_num]
 
         return stacked_dtensor
 
