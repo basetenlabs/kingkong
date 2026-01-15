@@ -289,16 +289,16 @@ class MoEStateDictAdapter(StateDictAdapter):
         sorted_expert_ids = sorted(experts.keys())
         sorted_experts = [experts[i] for i in sorted_expert_ids]
 
-        # Memory logging before stack operation
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            mem_before = torch.cuda.memory_allocated() / 1024**3
-            mem_reserved_before = torch.cuda.memory_reserved() / 1024**3
-            logger.error(
-                f"[MEM DEBUG] BEFORE stack: layer={layer_num}, key={abstract_key}, "
-                f"n_experts={len(sorted_experts)}, "
-                f"allocated={mem_before:.2f}GB, reserved={mem_reserved_before:.2f}GB"
-            )
+        # # Memory logging before stack operation
+        # if torch.cuda.is_available():
+        #     torch.cuda.synchronize()
+        #     mem_before = torch.cuda.memory_allocated() / 1024**3
+        #     mem_reserved_before = torch.cuda.memory_reserved() / 1024**3
+        #     logger.error(
+        #         f"[MEM DEBUG] BEFORE stack: layer={layer_num}, key={abstract_key}, "
+        #         f"n_experts={len(sorted_experts)}, "
+        #         f"allocated={mem_before:.2f}GB, reserved={mem_reserved_before:.2f}GB"
+        #     )
 
         # IMPORTANT: `sorted_experts` are DTensors when loading from HF via DCP.
         # Doing `torch.stack()` on DTensors can trigger DTensor propagation /
@@ -309,18 +309,18 @@ class MoEStateDictAdapter(StateDictAdapter):
         ]
         local_tensor = torch.stack(local_expert_locals, dim=0)
 
-        # Memory logging after stack operation
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            mem_after = torch.cuda.memory_allocated() / 1024**3
-            mem_reserved_after = torch.cuda.memory_reserved() / 1024**3
-            stack_size_mb = local_tensor.numel() * local_tensor.element_size() / 1024**2
-            logger.error(
-                f"[MEM DEBUG] AFTER stack: layer={layer_num}, key={abstract_key}, "
-                f"stack_shape={list(local_tensor.shape)}, stack_size={stack_size_mb:.1f}MB, "
-                f"allocated={mem_after:.2f}GB (+{mem_after - mem_before:.2f}GB), "
-                f"reserved={mem_reserved_after:.2f}GB"
-            )
+        # # Memory logging after stack operation
+        # if torch.cuda.is_available():
+        #     torch.cuda.synchronize()
+        #     mem_after = torch.cuda.memory_allocated() / 1024**3
+        #     mem_reserved_after = torch.cuda.memory_reserved() / 1024**3
+        #     stack_size_mb = local_tensor.numel() * local_tensor.element_size() / 1024**2
+        #     logger.error(
+        #         f"[MEM DEBUG] AFTER stack: layer={layer_num}, key={abstract_key}, "
+        #         f"stack_shape={list(local_tensor.shape)}, stack_size={stack_size_mb:.1f}MB, "
+        #         f"allocated={mem_after:.2f}GB (+{mem_after - mem_before:.2f}GB), "
+        #         f"reserved={mem_reserved_after:.2f}GB"
+        #     )
 
         assert (
             abstract_key in self.grouped_expert_weight_placements
