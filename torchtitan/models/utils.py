@@ -287,53 +287,9 @@ class MoEStateDictAdapter(StateDictAdapter):
             return None
 
         sorted_expert_ids = sorted(experts.keys())
-
-        # IMPORTANT: Memory-efficient stacking for large MoE models (e.g., DeepSeek-V3 671B).
-        # We must free individual expert tensors BEFORE allocating the stacked tensor
-        # to avoid holding 2x the memory during the stack operation.
-        #
-        # Strategy: Pre-allocate output tensor, copy each expert slice-by-slice,
-        # and delete the original expert immediately after copying.
-        # This ensures we never hold both the individual experts AND the stacked tensor.
-        #
-        # `sorted_experts` are DTensors when loading from HF via DCP.
-        # We extract ONLY the local shards to avoid DTensor collective overhead.
-
-        import gc
-
-        # Get first expert to determine shape and dtype
-        first_expert_id = sorted_expert_ids[0]
-        first_t = experts[first_expert_id]
-        first_local = first_t._local_tensor if isinstance(first_t, DTensor) else first_t
-        expert_shape = first_local.shape
-        expert_dtype = first_local.dtype
-        expert_device = first_local.device
-        num_experts = len(sorted_expert_ids)
-
-        # Pre-allocate output tensor
-        local_tensor = torch.empty(
-            (num_experts, *expert_shape),
-            dtype=expert_dtype,
-            device=expert_device,
-        )
-
-        # Copy each expert and immediately free it
-        for idx, expert_id in enumerate(sorted_expert_ids):
-            t = experts[expert_id]
-            local_t = t._local_tensor if isinstance(t, DTensor) else t
-            local_tensor[idx].copy_(local_t)
-            # Immediately delete from dictionary to free memory
-            del experts[expert_id]
-
-        # Clean up the layer entry
-        del expert_weights_by_layer[layer_num][abstract_key]
-        if not expert_weights_by_layer[layer_num]:
-            del expert_weights_by_layer[layer_num]
-
-        # Force GC to reclaim any remaining memory
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        sorted_experts = [experts[i] for i in sorted_expert_ids]
+        # pyrefly: ignore [missing-attribute]
+        local_tensor = torch.stack(sorted_experts, dim=0)._local_tensor
 
         assert (
             abstract_key in self.grouped_expert_weight_placements
@@ -347,117 +303,9 @@ class MoEStateDictAdapter(StateDictAdapter):
             run_check=False,
         )
 
-        return stacked_dtensor
-
-    def _concatenate_expert_weights_cpu_offload(
-        self,
-        expert_weights_by_layer: dict[str, dict[str, dict[int, torch.Tensor]]],
-        expert_metadata_by_layer: dict[str, dict[str, dict]],
-        abstract_key: str,
-        layer_num: str,
-    ) -> "DTensor | None":
-        """
-        Memory-efficient expert weight concatenation with CPU offloading.
-
-        This method is designed for loading very large MoE models (e.g., DeepSeek-V3 671B)
-        where GPU memory is insufficient to hold all individual expert weights plus the
-        stacked output simultaneously.
-
-        Strategy:
-        1. Expert weights are stored on CPU (offloaded during from_hf processing)
-        2. Stack experts on CPU using pre-allocated tensor
-        3. Move stacked tensor to GPU
-        4. Reconstruct DTensor with proper placements
-
-        Args:
-            expert_weights_by_layer: Dictionary with CPU tensors for each expert
-            expert_metadata_by_layer: DTensor metadata (device_mesh, original_device)
-            abstract_key: TorchTitan template key with {} placeholders
-            layer_num: Layer identifier
-
-        Returns:
-            Stacked DTensor on GPU if all experts collected, None otherwise
-        """
-        import gc
-
-        # Check if this layer/abstract_key exists
-        if layer_num not in expert_weights_by_layer:
-            return None
-        if abstract_key not in expert_weights_by_layer[layer_num]:
-            return None
-
-        experts = expert_weights_by_layer[layer_num][abstract_key]
-        expected_n_experts = (
-            self.local_experts_indices[abstract_key][1]
-            - self.local_experts_indices[abstract_key][0]
-        )
-
-        if len(experts) < expected_n_experts:
-            return None
-
-        # Get metadata for DTensor reconstruction
-        metadata = expert_metadata_by_layer[layer_num].get(abstract_key)
-        if metadata is None:
-            # Fallback to non-DTensor path
-            sorted_expert_ids = sorted(experts.keys())
-            sorted_experts = [experts[i] for i in sorted_expert_ids]
-            stacked_tensor = torch.stack(sorted_experts, dim=0)
-            del expert_weights_by_layer[layer_num][abstract_key]
-            if not expert_weights_by_layer[layer_num]:
-                del expert_weights_by_layer[layer_num]
-            return stacked_tensor
-
-        device_mesh = metadata["device_mesh"]
-        original_device = metadata["original_device"]
-
-        sorted_expert_ids = sorted(experts.keys())
-        num_experts = len(sorted_expert_ids)
-
-        # Get shape from first expert (all on CPU)
-        first_expert = experts[sorted_expert_ids[0]]
-        expert_shape = first_expert.shape
-        expert_dtype = first_expert.dtype
-
-        # Pre-allocate output on CPU
-        cpu_stacked = torch.empty(
-            (num_experts, *expert_shape),
-            dtype=expert_dtype,
-            device="cpu",
-            pin_memory=True,  # Enable faster CPU->GPU transfer
-        )
-
-        # Copy each expert to the stacked tensor and free immediately
-        for idx, expert_id in enumerate(sorted_expert_ids):
-            cpu_stacked[idx].copy_(experts[expert_id])
-            del experts[expert_id]
-
-        # Clean up layer entries
         del expert_weights_by_layer[layer_num][abstract_key]
         if not expert_weights_by_layer[layer_num]:
             del expert_weights_by_layer[layer_num]
-        del expert_metadata_by_layer[layer_num][abstract_key]
-        if not expert_metadata_by_layer[layer_num]:
-            del expert_metadata_by_layer[layer_num]
-
-        # Force GC before GPU allocation
-        gc.collect()
-
-        # Move stacked tensor to GPU
-        gpu_stacked = cpu_stacked.to(original_device, non_blocking=True)
-        del cpu_stacked
-
-        # Reconstruct DTensor
-        assert (
-            abstract_key in self.grouped_expert_weight_placements
-            and abstract_key in self.grouped_expert_weight_shape
-        ), "GroupedExperts weight metadata (placements, shape) can not be None!"
-
-        stacked_dtensor = DTensor.from_local(
-            gpu_stacked,
-            device_mesh,
-            self.grouped_expert_weight_placements[abstract_key],
-            run_check=False,
-        )
 
         return stacked_dtensor
 
