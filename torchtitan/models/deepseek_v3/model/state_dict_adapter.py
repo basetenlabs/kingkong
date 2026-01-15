@@ -6,6 +6,7 @@
 
 
 import re
+import logging
 from typing import Any
 
 import torch
@@ -15,6 +16,8 @@ from torch.distributed.tensor import DTensor
 from torchtitan.models.utils import MoEStateDictAdapter
 
 from .args import DeepSeekV3ModelArgs
+
+logger = logging.getLogger(__name__)
 
 
 class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
@@ -28,6 +31,8 @@ class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
         hf_assets_path: str | None,
     ):
         super().__init__(model_args, hf_assets_path)
+        # Avoid spamming logs: only warn once per unmapped abstract key.
+        self._warned_unmapped_to_hf_abstract_keys: set[str] = set()
         self.from_hf_map = {
             "model.embed_tokens.weight": "tok_embeddings.weight",
             # Attention Module
@@ -106,6 +111,17 @@ class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
         for key, value in state_dict.items():
             if "moe.experts" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
+                # Some torchtitan params (e.g., finetune LoRA adapters) do not exist in
+                # the HF checkpoint definition. Skip anything we can't map.
+                if abstract_key not in to_hf_map:
+                    if abstract_key not in self._warned_unmapped_to_hf_abstract_keys:
+                        self._warned_unmapped_to_hf_abstract_keys.add(abstract_key)
+                        logger.warning(
+                            "Skipping unmapped key during to_hf(): abstract_key=%s (example=%s)",
+                            abstract_key,
+                            key,
+                        )
+                    continue
                 # pyrefly: ignore [missing-attribute]
                 layer_num = re.search(r"\d+", key).group(0)
                 new_abstract_key = to_hf_map[abstract_key]
@@ -141,6 +157,15 @@ class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
 
             elif "layers" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
+                if abstract_key not in to_hf_map:
+                    if abstract_key not in self._warned_unmapped_to_hf_abstract_keys:
+                        self._warned_unmapped_to_hf_abstract_keys.add(abstract_key)
+                        logger.warning(
+                            "Skipping unmapped key during to_hf(): abstract_key=%s (example=%s)",
+                            abstract_key,
+                            key,
+                        )
+                    continue
                 # pyrefly: ignore [missing-attribute]
                 layer_num = re.search(r"\d+", key).group(0)
                 new_key = to_hf_map[abstract_key]
@@ -148,6 +173,8 @@ class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
                 hf_state_dict[new_key] = value
 
             else:
+                if key not in to_hf_map:
+                    continue
                 new_key = to_hf_map[key]
                 hf_state_dict[new_key] = value
 
