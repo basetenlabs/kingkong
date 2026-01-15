@@ -4,10 +4,16 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from torchtitan.components.dataloader import BaseDataLoader
 from torchtitan.components.loss import build_cross_entropy_loss
 from torchtitan.components.lr_scheduler import build_lr_schedulers
 from torchtitan.components.optimizer import build_optimizers
-from torchtitan.components.tokenizer import build_hf_tokenizer
+from torchtitan.components.tokenizer import BaseTokenizer, build_hf_tokenizer
+from torchtitan.config import JobConfig
+from torchtitan.hf_datasets.finetune_datasets import (
+    build_finetune_dataloader,
+    build_finetune_tokenizer,
+)
 from torchtitan.hf_datasets.text_datasets import build_text_dataloader
 from torchtitan.protocols.train_spec import TrainSpec
 
@@ -22,7 +28,64 @@ __all__ = [
     "Nemotron3StateDictAdapter",
     "parallelize_nemotron3",
     "nemotron3_args",
+    "get_train_spec",
+    "get_finetune_spec",
 ]
+
+
+def _is_finetuning_mode(job_config: JobConfig) -> bool:
+    """Check if the config indicates finetuning mode.
+
+    Finetuning mode is enabled when:
+    - dataset_format is "messages" (instruction tuning), OR
+    - dataset_format is explicitly set and differs from default pretraining behavior
+    """
+    dataset_format = getattr(job_config.training, "dataset_format", "text")
+    return dataset_format == "messages"
+
+
+def build_smart_dataloader(
+    dp_world_size: int,
+    dp_rank: int,
+    tokenizer: BaseTokenizer,
+    job_config: JobConfig,
+    infinite: bool = True,
+) -> BaseDataLoader:
+    """Smart dataloader builder that chooses based on config.
+
+    Uses finetuning dataloader when dataset_format="messages",
+    otherwise uses standard text dataloader.
+    """
+    if _is_finetuning_mode(job_config):
+        # For finetuning with messages, we need the tokenizer with pad token
+        from torchtitan.hf_datasets.chat_template import HfTokenizerWithPadToken
+        ft_tokenizer = HfTokenizerWithPadToken(job_config.model.hf_assets_path)
+        return build_finetune_dataloader(
+            dp_world_size=dp_world_size,
+            dp_rank=dp_rank,
+            tokenizer=ft_tokenizer,
+            job_config=job_config,
+            infinite=infinite,
+        )
+    else:
+        return build_text_dataloader(
+            dp_world_size=dp_world_size,
+            dp_rank=dp_rank,
+            tokenizer=tokenizer,
+            job_config=job_config,
+            infinite=infinite,
+        )
+
+
+def build_smart_tokenizer(job_config: JobConfig) -> BaseTokenizer:
+    """Smart tokenizer builder that chooses based on config.
+
+    Uses tokenizer with pad token for finetuning mode.
+    """
+    if _is_finetuning_mode(job_config):
+        return build_finetune_tokenizer(job_config)
+    else:
+        return build_hf_tokenizer(job_config)
 
 
 # NemotronH model flavors
@@ -93,6 +156,17 @@ nemotron3_args = {
 
 
 def get_train_spec() -> TrainSpec:
+    """Get the training spec for Nemotron3.
+
+    Automatically detects finetuning mode based on config:
+    - dataset_format="text" (default): Pretraining mode, all tokens trainable
+    - dataset_format="messages": Finetuning mode, only assistant responses trainable
+
+    Configure via job_config.training options:
+    - dataset_format: "text" or "messages"
+    - document_packing: True/False
+    - chat_start_sequence / chat_end_sequence for custom chat templates
+    """
     return TrainSpec(
         model_cls=Nemotron3Model,
         model_args=nemotron3_args,
@@ -100,8 +174,37 @@ def get_train_spec() -> TrainSpec:
         pipelining_fn=None,  # TODO: Implement pipelining if needed
         build_optimizers_fn=build_optimizers,
         build_lr_schedulers_fn=build_lr_schedulers,
-        build_dataloader_fn=build_text_dataloader,
-        build_tokenizer_fn=build_hf_tokenizer,
+        build_dataloader_fn=build_smart_dataloader,
+        build_tokenizer_fn=build_smart_tokenizer,
+        build_loss_fn=build_cross_entropy_loss,
+        state_dict_adapter=Nemotron3StateDictAdapter,
+    )
+
+
+def get_finetune_spec() -> TrainSpec:
+    """Get the training spec explicitly for finetuning.
+
+    Uses finetuning datasets that support:
+    - Text format: All tokens trainable (continued pretraining)
+    - Messages format: Only assistant responses trainable (instruction tuning)
+
+    Configure via job_config.training options:
+    - dataset_format: "text" or "messages"
+    - document_packing: True/False
+    - chat_start_sequence / chat_end_sequence for custom chat templates
+
+    Note: get_train_spec() now auto-detects finetuning mode, so this function
+    is provided for explicit usage when needed.
+    """
+    return TrainSpec(
+        model_cls=Nemotron3Model,
+        model_args=nemotron3_args,
+        parallelize_fn=parallelize_nemotron3,
+        pipelining_fn=None,
+        build_optimizers_fn=build_optimizers,
+        build_lr_schedulers_fn=build_lr_schedulers,
+        build_dataloader_fn=build_finetune_dataloader,
+        build_tokenizer_fn=build_finetune_tokenizer,
         build_loss_fn=build_cross_entropy_loss,
         state_dict_adapter=Nemotron3StateDictAdapter,
     )

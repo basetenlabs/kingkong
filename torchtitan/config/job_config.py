@@ -336,6 +336,68 @@ class Training:
     dataloader: DataLoader = field(default_factory=DataLoader)
     """DataLoader configuration"""
 
+    # Finetuning-specific options
+    dataset_format: Literal["text", "messages"] = "text"
+    """
+    Format of the training dataset:
+    - "text": Plain text for pretraining/continued pretraining. All tokens are trainable.
+    - "messages": Chat/instruction format with 'messages' field. Only assistant responses
+      are trainable, user messages and system prompts are masked out.
+    """
+
+    datasource: Literal["huggingface", "local_jsonl"] = "huggingface"
+    """
+    Source of the training data:
+    - "huggingface": Load from HuggingFace Hub (default)
+    - "local_jsonl": Load from a local JSONL file
+    """
+
+    document_packing: bool = True
+    """
+    Whether to pack multiple documents into a single sequence for efficiency.
+    When True, multiple conversations/documents are concatenated to fill seq_len.
+    When False, each document is a separate sequence (padded if needed, dropped if too long).
+    Set to False for long-context training with context parallelism.
+    """
+
+    chat_start_sequence: str = "<|im_start|>assistant\n"
+    """
+    Token sequence that marks the start of assistant/model generation in chat templates.
+    Used with dataset_format="messages" to identify which tokens to train on.
+    Common values:
+    - ChatML: "<|im_start|>assistant\\n"
+    - Llama 3: "<|start_header_id|>assistant<|end_header_id|>\\n\\n"
+    - Llama 2/Mistral: "[/INST] "
+    """
+
+    chat_end_sequence: str = "<|im_end|>"
+    """
+    Token sequence that marks the end of assistant/model generation in chat templates.
+    Used with dataset_format="messages" to identify which tokens to train on.
+    Common values:
+    - ChatML: "<|im_end|>"
+    - Llama 3: "<|eot_id|>"
+    - Llama 2/Mistral: "</s>"
+    """
+
+    hf_token: str | None = None
+    """
+    HuggingFace API token for accessing gated datasets.
+    Can also be set via HF_TOKEN environment variable.
+    """
+
+    data_files: str | None = None
+    """
+    Specific data files to load from a HuggingFace dataset.
+    For example, "data/train-00000-of-00001.parquet".
+    """
+
+    infinite_dataloader: bool = True
+    """
+    Whether to loop the dataset infinitely during training.
+    Set to False to stop training when data is exhausted.
+    """
+
 
 @dataclass
 class Parallelism:
