@@ -189,11 +189,16 @@ class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
         NOTE: This function destructively modifies hf_state_dict to free memory
         as weights are processed. This is intentional for memory efficiency with
         large models like DeepSeek-V3.
+
+        MEMORY OPTIMIZATION: Expert weights are offloaded to CPU immediately after
+        extraction to avoid GPU OOM. They are stacked on CPU, then moved back to GPU.
         """
         import gc
 
         state_dict = {}
         expert_weights_by_layer = {}  # {layer: {abstract_key: {expert_id: tensor}}}
+        # Store metadata for DTensor reconstruction
+        expert_metadata_by_layer: dict[str, dict[str, dict]] = {}
 
         # Iterate over a copy of keys so we can delete from dict during iteration
         # Sort keys to process layer-by-layer and group experts by weight type,
@@ -229,33 +234,50 @@ class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
                 # Store the expert's weight in expert_weights_by_layer for concatenating later.
                 if layer_num not in expert_weights_by_layer:
                     expert_weights_by_layer[layer_num] = {}
+                    expert_metadata_by_layer[layer_num] = {}
                 if titan_abstract_key not in expert_weights_by_layer[layer_num]:
                     expert_weights_by_layer[layer_num][titan_abstract_key] = {}
-                expert_weights_by_layer[layer_num][titan_abstract_key][
-                    int(expert_num)
-                ] = value
 
+                # MEMORY OPTIMIZATION: Offload expert weights to CPU immediately
+                # to avoid GPU OOM during checkpoint loading for large models.
                 if isinstance(value, DTensor):
-                    stacked_value = self._concatenate_expert_weights_dtensor(
-                        expert_weights_by_layer,
-                        titan_abstract_key,
-                        layer_num,
-                        value.device_mesh,
-                    )
-                else:  # keep this path to be compatible with offline conversion
-                    stacked_value = self._concatenate_expert_weights(
-                        expert_weights_by_layer,
-                        titan_abstract_key,
-                        layer_num,
-                        # pyrefly: ignore [missing-attribute]
-                        self.model_args.moe_args.num_experts,
-                    )
+                    # Extract local tensor and move to CPU
+                    local_tensor = value._local_tensor.to("cpu", non_blocking=True)
+                    expert_weights_by_layer[layer_num][titan_abstract_key][
+                        int(expert_num)
+                    ] = local_tensor
+                    # Store DTensor metadata for later reconstruction (only once per abstract_key)
+                    if titan_abstract_key not in expert_metadata_by_layer[layer_num]:
+                        expert_metadata_by_layer[layer_num][titan_abstract_key] = {
+                            "device_mesh": value.device_mesh,
+                            "original_device": value._local_tensor.device,
+                        }
+                    # Delete original DTensor to free GPU memory
+                    del value
+                else:
+                    expert_weights_by_layer[layer_num][titan_abstract_key][
+                        int(expert_num)
+                    ] = value
+
+                # Check if we have all experts and can stack
+                stacked_value = self._concatenate_expert_weights_cpu_offload(
+                    expert_weights_by_layer,
+                    expert_metadata_by_layer,
+                    titan_abstract_key,
+                    layer_num,
+                )
 
                 if stacked_value is not None:
                     state_dict[new_key] = stacked_value
 
                 # Delete from hf_state_dict to free memory incrementally
                 del hf_state_dict[key]
+
+                # Aggressive GC for expert weights
+                if processed_count % 100 == 0:
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
             elif "layers" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
