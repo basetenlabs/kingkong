@@ -42,7 +42,7 @@ decay_type = "cosine"
 
 [training]
 local_batch_size = 1
-seq_len = 8192  # Keeps ~69% of data (median is 2344, mean is 3614)
+seq_len = 4096
 max_norm = 1.0
 steps = 1000
 dtype = "bfloat16"

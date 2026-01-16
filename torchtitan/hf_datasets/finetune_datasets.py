@@ -182,6 +182,8 @@ class SingleSequenceDataset(IterableDataset, Stateful):
         self.pad_token_id = pad_token_id
         self.mask_token_id = -100  # Standard ignore index for loss
         self._next_idx = 0
+        self._logged_too_long = False
+        self._logged_no_trainable = False
 
     def __iter__(self):
         global _DEBUG_BATCH_COUNT
@@ -191,10 +193,12 @@ class SingleSequenceDataset(IterableDataset, Stateful):
             incoming_len = len(transcript_and_mask.tokens)
 
             if incoming_len > max_token_len:
-                logger.warning(
-                    f"Dropping sequence of length {incoming_len} since it exceeds "
-                    f"max length {max_token_len}"
-                )
+                if not self._logged_too_long:
+                    logger.warning(
+                        f"Dataset contains sequences exceeding max length {max_token_len}. "
+                        f"These will be dropped. First seen: {incoming_len} tokens."
+                    )
+                    self._logged_too_long = True
                 continue
 
             if incoming_len == 0:
@@ -226,10 +230,12 @@ class SingleSequenceDataset(IterableDataset, Stateful):
             # Validate that we have trainable tokens
             trainable_count = masks[1:].sum().item()
             if trainable_count == 0:
-                logger.warning(
-                    f"No trainable tokens in sequence! All {len(labels)} tokens are "
-                    f"masked. Skipping this sequence to avoid NaN loss."
-                )
+                if not self._logged_no_trainable:
+                    logger.warning(
+                        "Dataset contains sequences with no trainable tokens. "
+                        "These will be skipped to avoid NaN loss."
+                    )
+                    self._logged_no_trainable = True
                 continue
 
             # Debug tracing
@@ -326,6 +332,8 @@ class PackedSequencesDataset(IterableDataset, Stateful):
         self.pad_token_id = pad_token_id
         self.mask_token_id = -100
         self._next_idx = 0
+        self._logged_too_long = False
+        self._logged_no_trainable = False
 
     def __iter__(self):
         global _DEBUG_BATCH_COUNT
@@ -340,10 +348,12 @@ class PackedSequencesDataset(IterableDataset, Stateful):
 
             # Drop if too long and we're not splitting
             if incoming_len > max_buffer_token_len and not self.split_tokens:
-                logger.warning(
-                    f"Dropping incoming sequence of length {incoming_len} since it "
-                    f"is bigger than the maximum allowed"
-                )
+                if not self._logged_too_long:
+                    logger.warning(
+                        f"Dataset contains sequences exceeding max length {max_buffer_token_len}. "
+                        f"These will be dropped. First seen: {incoming_len} tokens."
+                    )
+                    self._logged_too_long = True
                 continue
 
             # Drain buffer when it would overflow
@@ -393,10 +403,12 @@ class PackedSequencesDataset(IterableDataset, Stateful):
                 # Validate trainable tokens
                 trainable_count = masks[1:].sum().item()
                 if trainable_count == 0:
-                    logger.warning(
-                        f"No trainable tokens in batch! All {len(labels)} tokens are "
-                        f"masked. Skipping this batch to avoid NaN loss."
-                    )
+                    if not self._logged_no_trainable:
+                        logger.warning(
+                            "Dataset contains batches with no trainable tokens. "
+                            "These will be skipped to avoid NaN loss."
+                        )
+                        self._logged_no_trainable = True
                     continue
 
                 # Debug tracing
