@@ -19,7 +19,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed.checkpoint import HuggingFaceStorageWriter
+from torch.distributed.checkpoint import HuggingFaceStorageWriter, DefaultLoadPlanner
 from torch.distributed.checkpoint._consolidate_hf_safetensors import (
     consolidate_safetensors_files_on_every_rank,
 )
@@ -473,12 +473,13 @@ class CheckpointManager:
             dcp.load(
                 hf_state_dict,
                 storage_reader=hf_storage_reader,
+                planner=DefaultLoadPlanner(allow_partial_load=True),
             )
 
             state_dict = self.sd_adapter.from_hf(hf_state_dict)
             self.states[MODEL].load_state_dict(state_dict)
         else:
-            dcp.load(state_dict, checkpoint_id=checkpoint_id)
+            dcp.load(state_dict, checkpoint_id=checkpoint_id, planner=DefaultLoadPlanner(allow_partial_load=True))
 
             # TODO: Since we flatten the model states in state_dict, we need to
             # manually call load_state_dict() for the model. Need to fix this.

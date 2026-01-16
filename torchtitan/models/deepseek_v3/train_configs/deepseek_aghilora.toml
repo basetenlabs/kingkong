@@ -20,7 +20,7 @@ enable_wandb = true
 [model]
 name = "deepseek_v3"
 flavor = "deepseek_aghilora"
-hf_assets_path = "/root/.cache/team_artifacts/dvs3.1-fugazzi"
+hf_assets_path = "/root/.cache/team_artifacts/DeepSeek-V3.1-Base"
 # converters = ["float8"]
 
 [optimizer]
@@ -49,13 +49,13 @@ tensor_parallel_degree = 1
 enable_async_tensor_parallel = false
 pipeline_parallel_degree = 1
 pipeline_parallel_schedule = "Interleaved1F1B"
-expert_parallel_degree = 1
+expert_parallel_degree = 8
 expert_tensor_parallel_degree = 1
 
 [checkpoint]
 enable = true
 folder = "checkpoint"
-interval = 50
+interval = 5000
 last_save_model_only = false
 initial_load_in_hf = true
 export_dtype = "float16"
