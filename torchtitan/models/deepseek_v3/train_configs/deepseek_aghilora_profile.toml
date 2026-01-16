@@ -1,13 +1,13 @@
 [job]
 dump_folder = "/workspace/aghilan-workspace/kingkong/outputs"
-description = "DeepSeek-V3 Aghi model training"
+description = "DeepSeek-V3 Aghi model training - PROFILING"
 print_config = true
 
 [profiling]
-enable_profiling = false
+enable_profiling = true
 save_traces_folder = "profile_trace"
-profile_freq = 10
-enable_memory_snapshot = false
+profile_freq = 5  # Profile every 5 steps to catch memory spikes
+enable_memory_snapshot = true
 save_memory_snapshot_folder = "memory_snapshot"
 
 [metrics]
@@ -38,7 +38,7 @@ min_lr_factor = 1.0
 local_batch_size = 4
 seq_len = 4096
 max_norm = 1.0  # grad norm clipping
-steps = 120
+steps = 30  # Fewer steps for profiling run
 dataset = "c4"  # supported datasets: c4_test (2K), c4 (177M)
 
 [parallelism]
@@ -55,7 +55,7 @@ expert_tensor_parallel_degree = 1
 [checkpoint]
 enable = true
 folder = "checkpoint"
-interval = 50
+interval = 500
 last_save_model_only = false
 initial_load_in_hf = true
 export_dtype = "float16"
