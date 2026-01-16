@@ -260,6 +260,14 @@ class MoEStateDictAdapter(StateDictAdapter):
         device_mesh: DeviceMesh,
     ) -> torch.Tensor | None:
         """
+        Memory-efficient concatenation of expert weights into a DTensor.
+
+        This version minimizes GPU memory by:
+        1. Moving expert tensors to CPU first
+        2. Pre-allocating output tensor on GPU
+        3. Copying from CPU to GPU one expert at a time
+        4. Freeing CPU tensors immediately after each copy
+
         Args:
             expert_weights_by_layer: Dictionary tracking expert weights by layer, abstract key, and expert ID.
                 Structure: {
@@ -287,9 +295,63 @@ class MoEStateDictAdapter(StateDictAdapter):
             return None
 
         sorted_expert_ids = sorted(experts.keys())
-        sorted_experts = [experts[i] for i in sorted_expert_ids]
+        n_experts = len(sorted_expert_ids)
+
+        # Get the local tensor from first expert DTensor to determine shape/dtype/device
         # pyrefly: ignore [missing-attribute]
-        local_tensor = torch.stack(sorted_experts, dim=0)._local_tensor
+        first_local = experts[sorted_expert_ids[0]]._local_tensor
+        output_shape = (n_experts,) + first_local.shape
+        target_device = first_local.device
+        target_dtype = first_local.dtype
+
+        # Log memory before operation (only for first layer to avoid spam)
+        is_first_layer = str(layer_num) == "0" or str(layer_num) == "1"
+        if is_first_layer and torch.cuda.is_available():
+            mem_before = torch.cuda.memory_allocated() / (1024**3)
+            mem_reserved = torch.cuda.memory_reserved() / (1024**3)
+            logger.warning(
+                f"[Memory] Before expert concat layer={layer_num} key={abstract_key}: "
+                f"allocated={mem_before:.2f}GiB, reserved={mem_reserved:.2f}GiB, "
+                f"n_experts={n_experts}"
+            )
+
+        # Step 1: Move all expert tensors to CPU first to free GPU memory
+        cpu_experts: dict[int, torch.Tensor] = {}
+        for expert_id in sorted_expert_ids:
+            # pyrefly: ignore [missing-attribute]
+            cpu_experts[expert_id] = experts[expert_id]._local_tensor.to(
+                "cpu", non_blocking=True
+            )
+            del experts[expert_id]  # Free GPU tensor reference
+
+        # Sync and free GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+
+        # Log memory after moving to CPU
+        if is_first_layer and torch.cuda.is_available():
+            mem_after_cpu = torch.cuda.memory_allocated() / (1024**3)
+            logger.warning(
+                f"[Memory] After moving experts to CPU: allocated={mem_after_cpu:.2f}GiB"
+            )
+
+        # Step 2: Pre-allocate output tensor on GPU
+        local_tensor = torch.empty(
+            output_shape, dtype=target_dtype, device=target_device
+        )
+
+        # Step 3: Copy from CPU to GPU one expert at a time
+        for idx, expert_id in enumerate(sorted_expert_ids):
+            local_tensor[idx].copy_(cpu_experts[expert_id])
+            del cpu_experts[expert_id]  # Free CPU memory immediately
+
+        # Log memory after concat
+        if is_first_layer and torch.cuda.is_available():
+            mem_after = torch.cuda.memory_allocated() / (1024**3)
+            logger.warning(
+                f"[Memory] After expert concat: allocated={mem_after:.2f}GiB"
+            )
 
         assert (
             abstract_key in self.grouped_expert_weight_placements
@@ -330,7 +392,12 @@ class MoEStateDictAdapter(StateDictAdapter):
         n_experts: int,
     ) -> torch.Tensor | None:
         """
-        Concatenated GroupedExperts weight using torch.stack(). Used for offline conversion.
+        Memory-efficient concatenation of expert weights. Used for offline conversion.
+
+        This version minimizes GPU memory by:
+        1. Moving expert tensors to CPU first
+        2. Pre-allocating output tensor on GPU
+        3. Copying from CPU to GPU one expert at a time
 
         Args:
             expert_weights_by_layer: Dictionary tracking expert weights by layer, abstract key, and expert ID.
@@ -355,8 +422,50 @@ class MoEStateDictAdapter(StateDictAdapter):
             return None
 
         sorted_expert_ids = sorted(experts.keys())
-        sorted_experts = [experts[i] for i in sorted_expert_ids]
-        stacked_tensor = torch.stack(sorted_experts, dim=0)
+
+        # Get shape, dtype, device from first expert
+        first_expert = experts[sorted_expert_ids[0]]
+        output_shape = (len(sorted_expert_ids),) + first_expert.shape
+        target_device = first_expert.device
+        target_dtype = first_expert.dtype
+
+        # Log memory before operation (only for first layer)
+        if layer_num == "0" or layer_num == 0:
+            if torch.cuda.is_available():
+                mem_before = torch.cuda.memory_allocated() / (1024**3)
+                logger.info(
+                    f"[Memory] Before expert concat layer={layer_num}: "
+                    f"allocated={mem_before:.2f}GiB"
+                )
+
+        # Step 1: Move all expert tensors to CPU first to free GPU memory
+        cpu_experts: dict[int, torch.Tensor] = {}
+        for expert_id in sorted_expert_ids:
+            cpu_experts[expert_id] = experts[expert_id].to("cpu", non_blocking=True)
+            del experts[expert_id]
+
+        # Sync and free GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+
+        # Step 2: Pre-allocate output tensor on GPU
+        stacked_tensor = torch.empty(
+            output_shape, dtype=target_dtype, device=target_device
+        )
+
+        # Step 3: Copy from CPU to GPU one expert at a time
+        for idx, expert_id in enumerate(sorted_expert_ids):
+            stacked_tensor[idx].copy_(cpu_experts[expert_id])
+            del cpu_experts[expert_id]  # Free CPU memory immediately
+
+        # Log memory after concat
+        if layer_num == "0" or layer_num == 0:
+            if torch.cuda.is_available():
+                mem_after = torch.cuda.memory_allocated() / (1024**3)
+                logger.info(
+                    f"[Memory] After expert concat: allocated={mem_after:.2f}GiB"
+                )
 
         del expert_weights_by_layer[layer_num][abstract_key]
         if not expert_weights_by_layer[layer_num]:
