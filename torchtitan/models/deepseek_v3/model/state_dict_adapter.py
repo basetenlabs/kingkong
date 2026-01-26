@@ -185,14 +185,48 @@ class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
         1. When loading from HF checkpoint, dequantize the weights from float8 to float32.
         2. Convert between the HF shape and the torchtitan shape.
         3. Concat separate expert's weight into GroupedExperts' weight.
+
+        NOTE: This function destructively modifies hf_state_dict to free memory
+        as weights are processed. This is intentional for memory efficiency with
+        large models like DeepSeek-V3.
+
+        MEMORY OPTIMIZATION: Expert weights are offloaded to CPU immediately after
+        extraction to avoid GPU OOM. They are stacked on CPU, then moved back to GPU.
         """
+        import gc
 
         state_dict = {}
         expert_weights_by_layer = {}  # {layer: {abstract_key: {expert_id: tensor}}}
+        # Store metadata for DTensor reconstruction
+        expert_metadata_by_layer: dict[str, dict[str, dict]] = {}
 
-        for key, value in hf_state_dict.items():
+        # Iterate over a copy of keys so we can delete from dict during iteration
+        # Sort keys to process layer-by-layer and group experts by weight type,
+        # minimizing memory from partial accumulations
+        def get_sort_key(key: str) -> tuple:
+            layer_match = re.search(r"layers\.(\d+)", key)
+            layer_num = int(layer_match.group(1)) if layer_match else -1
+            # Extract weight type (gate_proj, up_proj, down_proj) for grouping
+            weight_type = ""
+            if "gate_proj" in key:
+                weight_type = "gate_proj"
+            elif "up_proj" in key:
+                weight_type = "up_proj"
+            elif "down_proj" in key:
+                weight_type = "down_proj"
+            return (layer_num, weight_type, key)
+
+        all_keys = sorted(hf_state_dict.keys(), key=get_sort_key)
+        processed_count = 0
+
+        for key in all_keys:
+            value = hf_state_dict[key]
+
             if "mlp.experts" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=2)
+                if abstract_key not in self.from_hf_map:
+                    del hf_state_dict[key]
+                    continue
                 layer_num, expert_num = re.findall(r"\d+", key)
                 titan_abstract_key = self.from_hf_map[abstract_key]
                 new_key = titan_abstract_key.format(layer_num)
@@ -200,41 +234,76 @@ class DeepSeekV3StateDictAdapter(MoEStateDictAdapter):
                 # Store the expert's weight in expert_weights_by_layer for concatenating later.
                 if layer_num not in expert_weights_by_layer:
                     expert_weights_by_layer[layer_num] = {}
+                    expert_metadata_by_layer[layer_num] = {}
                 if titan_abstract_key not in expert_weights_by_layer[layer_num]:
                     expert_weights_by_layer[layer_num][titan_abstract_key] = {}
-                expert_weights_by_layer[layer_num][titan_abstract_key][
-                    int(expert_num)
-                ] = value
 
+                # MEMORY OPTIMIZATION: Offload expert weights to CPU immediately
+                # to avoid GPU OOM during checkpoint loading for large models.
                 if isinstance(value, DTensor):
-                    stacked_value = self._concatenate_expert_weights_dtensor(
-                        expert_weights_by_layer,
-                        titan_abstract_key,
-                        layer_num,
-                        value.device_mesh,
-                    )
-                else:  # keep this path to be compatible with offline conversion
-                    stacked_value = self._concatenate_expert_weights(
-                        expert_weights_by_layer,
-                        titan_abstract_key,
-                        layer_num,
-                        # pyrefly: ignore [missing-attribute]
-                        self.model_args.moe_args.num_experts,
-                    )
+                    # Extract local tensor and move to CPU
+                    local_tensor = value._local_tensor.to("cpu", non_blocking=True)
+                    expert_weights_by_layer[layer_num][titan_abstract_key][
+                        int(expert_num)
+                    ] = local_tensor
+                    # Store DTensor metadata for later reconstruction (only once per abstract_key)
+                    if titan_abstract_key not in expert_metadata_by_layer[layer_num]:
+                        expert_metadata_by_layer[layer_num][titan_abstract_key] = {
+                            "device_mesh": value.device_mesh,
+                            "original_device": value._local_tensor.device,
+                        }
+                    # Delete original DTensor to free GPU memory
+                    del value
+                else:
+                    expert_weights_by_layer[layer_num][titan_abstract_key][
+                        int(expert_num)
+                    ] = value
+
+                # Check if we have all experts and can stack
+                stacked_value = self._concatenate_expert_weights_cpu_offload(
+                    expert_weights_by_layer,
+                    expert_metadata_by_layer,
+                    titan_abstract_key,
+                    layer_num,
+                )
 
                 if stacked_value is not None:
                     state_dict[new_key] = stacked_value
 
+                # Delete from hf_state_dict to free memory incrementally
+                del hf_state_dict[key]
+
+                # Aggressive GC for expert weights
+                if processed_count % 100 == 0:
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
             elif "layers" in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
+                if abstract_key not in self.from_hf_map:
+                    del hf_state_dict[key]
+                    continue
                 # pyrefly: ignore [missing-attribute]
                 layer_num = re.search(r"\d+", key).group(0)
                 new_key = self.from_hf_map[abstract_key]
                 new_key = new_key.format(layer_num)
                 state_dict[new_key] = value
+                del hf_state_dict[key]
 
             else:
+                if key not in self.from_hf_map:
+                    del hf_state_dict[key]
+                    continue
                 new_key = self.from_hf_map[key]
                 state_dict[new_key] = value
+                del hf_state_dict[key]
+
+            # Periodically trigger garbage collection to free GPU memory
+            processed_count += 1
+            if processed_count % 1000 == 0:
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         return state_dict
