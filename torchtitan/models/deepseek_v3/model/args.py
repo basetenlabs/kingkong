@@ -95,7 +95,7 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
     # Control which projections get LoRA via finetune_lora_target_modules.
     finetune_lora_rank: int = 0
     finetune_lora_alpha: float = 32.0
-    
+
     # Allowed values: ["wkv_a", "wkv_b", "wo"]
     finetune_lora_target_modules: List[str] = field(
         default_factory=lambda: ["wkv_a", "wkv_b", "wo"]
