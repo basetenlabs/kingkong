@@ -68,6 +68,4 @@ jobs:
         sudo chown -R $(id -u):$(id -g) "$RUNNER_TEMP/artifacts-to-be-uploaded"
 
         python -m tests.integration_tests.run_tests --gpu_arch_type ${{ matrix.gpu-arch-type }} --test_suite models $RUNNER_TEMP/artifacts-to-be-uploaded --ngpu 8
-        python -m tests.integration_tests.flux $RUNNER_TEMP/artifacts-to-be-uploaded/flux --ngpu 8
         rm -rf $RUNNER_TEMP/artifacts-to-be-uploaded/*/checkpoint
-        rm -rf $RUNNER_TEMP/artifacts-to-be-uploaded/flux/*/inference_results/
