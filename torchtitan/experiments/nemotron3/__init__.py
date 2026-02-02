@@ -59,6 +59,7 @@ def build_smart_dataloader(
     if _is_finetuning_mode(job_config):
         # For finetuning with messages, we need the tokenizer with pad token
         from torchtitan.hf_datasets.chat_template import HfTokenizerWithPadToken
+
         ft_tokenizer = HfTokenizerWithPadToken(job_config.model.hf_assets_path)
         return build_finetune_dataloader(
             dp_world_size=dp_world_size,

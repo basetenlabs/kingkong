@@ -31,11 +31,11 @@ from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.protocols.model_converter import build_model_converters
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
-from torchtitan.tools.debugger import maybe_launch_debugger
 from torchtitan.tools.profiling import (
     maybe_enable_memory_snapshot,
     maybe_enable_profiling,
 )
+
 
 def _apply_model_args_overrides(
     model_args: Any, overrides: dict[str, Any]
@@ -69,10 +69,10 @@ def _apply_model_args_overrides(
 
 def maybe_launch_debugger() -> None:
     """Launch debugpy debugger if DEBUG or DEBUGPY environment variable is set.
-    
+
     Environment variables:
         DEBUG or DEBUGPY: Set to "1", "true", or "yes" to enable debugging
-        DEBUG_WAIT_RANKS: Comma-separated list of ranks to wait for debugger, 
+        DEBUG_WAIT_RANKS: Comma-separated list of ranks to wait for debugger,
                           or "all" (default) to wait on all ranks
         DEBUG_TIMEOUT: Timeout in seconds to wait for debugger attachment (default: 30)
     """
@@ -239,7 +239,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         # build model (using meta init)
         model_args = self.train_spec.model_args[job_config.model.flavor]
-        
+
         # Apply optional per-run model-args overrides from TOML/CLI.
         # These overrides are applied before update_from_config() so that fields derived from
         # training config (e.g., max_seq_len from training.seq_len) can still take precedence.

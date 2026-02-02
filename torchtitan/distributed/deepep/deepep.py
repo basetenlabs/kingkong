@@ -75,8 +75,6 @@ def _dispatch_op_impl(
     num_tokens_per_expert: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Execute DeepEP dispatch."""
-    global _buffer
-
     buffer = _buffer
     assert buffer is not None, "Buffer must be initialized before dispatch"
 
@@ -114,8 +112,6 @@ def _dispatch_op_impl(
 @torch.library.impl(_lib, "combine", "CUDA")
 def _combine_op_impl(x: torch.Tensor, cache_id: torch.Tensor) -> torch.Tensor:
     """Execute DeepEP combine."""
-    global _buffer
-
     buffer = _buffer
     assert buffer is not None, "Buffer must be initialized before combine"
 
@@ -141,8 +137,6 @@ def _dispatch_backward(
     ctx, grad_recv_x, grad_recv_indices, grad_recv_scores, grad_num_recv, grad_cache_id
 ):
     """Backward for dispatch: performs combine on gradients."""
-    global _buffer
-
     if grad_recv_x is None:
         return None, None, None, None, None, None, None
 
@@ -180,8 +174,6 @@ def _dispatch_setup_context(ctx, inputs, output):
 
 def _combine_backward(ctx, grad_combined):
     """Backward for combine: performs dispatch on gradients."""
-    global _buffer
-
     handle = ctx.saved_handle
     previous_event = _create_event_if_async(True)
 

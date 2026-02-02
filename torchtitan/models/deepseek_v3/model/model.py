@@ -10,6 +10,7 @@ import torch
 from torch import nn
 from torch.nn.attention.flex_attention import and_masks, BlockMask
 from torchtitan.components.tokenizer import BaseTokenizer
+from torchtitan.lora import LoRALinear
 from torchtitan.models.attention import (
     create_attention_mask,
     FlexAttentionWrapper,
@@ -20,10 +21,9 @@ from torchtitan.models.attention import (
 from torchtitan.models.moe import build_moe, FeedForward
 from torchtitan.protocols.model import AttentionMasksType
 from torchtitan.protocols.train_spec import ModelProtocol
+from torchtitan.tools.logging import logger
 
 from .args import DeepSeekV3ModelArgs
-from torchtitan.tools.logging import logger
-from torchtitan.lora import LoRALinear
 
 
 # Adapted from https://github.com/DeepSeek-ai/DeepSeek-V3/blob/main/inference/model.py#L294
@@ -266,16 +266,19 @@ class Attention(nn.Module):
             bias=False,
         )
         self.wo = nn.Linear(self.n_heads * self.v_head_dim, self.dim, bias=False)
-        
+
         self.finetune_lora_wo: LoRALinear | None = None
-        if self.is_lora_finetuning_enabled and "wo" in self.finetune_lora_target_modules:
+        if (
+            self.is_lora_finetuning_enabled
+            and "wo" in self.finetune_lora_target_modules
+        ):
             self.finetune_lora_wo = LoRALinear(
                 in_features=self.n_heads * self.v_head_dim,
                 out_features=self.dim,
                 rank=self.finetune_lora_rank,
                 alpha=self.finetune_lora_alpha,
             )
-        
+
         self.softmax_scale = self.qk_head_dim**-0.5
 
         if model_args.max_seq_len > model_args.original_seq_len:
@@ -353,8 +356,6 @@ class Attention(nn.Module):
             [k_nope, k_pe.expand(-1, -1, self.n_heads, -1)], dim=-1
         )  # (bsz, seqlen, n_heads, qk_head_dim)
 
-        
-
         q = q.transpose(1, 2)  # (bsz, n_heads, seqlen, qk_head_dim)
         k = k.transpose(1, 2)  # (bsz, n_heads, seqlen, qk_head_dim)
         v = v.transpose(1, 2)  # (bsz, n_heads, seqlen, v_head_dim)
@@ -374,7 +375,7 @@ class Attention(nn.Module):
             1, 2
         ).contiguous()  # (bsz, seqlen, n_heads, v_head_dim)
         output = output.view(bsz, seqlen, -1)  # (bsz, seqlen, n_heads * v_head_dim)
-        
+
         # Apply base projection + finetune LoRA if enabled
         out = self.wo(output)
         if self.finetune_lora_wo is not None:
@@ -396,7 +397,7 @@ class Attention(nn.Module):
             nn.init.trunc_normal_(linear.weight, mean=0.0, std=0.02)
         nn.init.trunc_normal_(self.wo.weight, mean=0.0, std=init_std)
 
-         # Initialize fine-tuning LoRA adapter
+        # Initialize fine-tuning LoRA adapter
         finetune_loras = [
             self.finetune_lora_wkv_a,
             self.finetune_lora_wkv_b,
@@ -529,11 +530,10 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
                 a=-cutoff_factor * final_out_std,
                 b=cutoff_factor * final_out_std,
             )
-        
+
         if self.model_args.is_lora_finetuning_enabled:
             self.freeze_for_finetuning()
-        
-    
+
     def freeze_for_finetuning(self) -> None:
         """
         Freeze all parameters except LoRA layers.
@@ -552,7 +552,9 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
                 param.requires_grad = True
                 trainable_count += param.numel()
 
-        logger.info(f"[LoRA] Trainable params: {trainable_count:,} / {total_count:,} ({100 * trainable_count / total_count:.2f}%)")
+        logger.info(
+            f"[LoRA] Trainable params: {trainable_count:,} / {total_count:,} ({100 * trainable_count / total_count:.2f}%)"
+        )
 
     def get_attention_masks(
         self,

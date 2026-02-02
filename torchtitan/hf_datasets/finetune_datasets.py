@@ -27,7 +27,6 @@ from torch.distributed.checkpoint.stateful import Stateful
 from torch.utils.data import IterableDataset
 
 from torchtitan.components.dataloader import ParallelAwareDataloader
-from torchtitan.components.tokenizer import HuggingFaceTokenizer
 from torchtitan.config import JobConfig
 from torchtitan.tools.logging import logger
 
@@ -35,9 +34,9 @@ from .chat_template import (
     ChatTemplate,
     HfTokenizerWithPadToken,
     MessageRow,
-    TokensAndMask,
     tokenize_and_mask,
     tokenize_no_mask,
+    TokensAndMask,
 )
 
 # Enable debug tracing with environment variable: TORCHTITAN_DEBUG_TOKENS=1
@@ -251,7 +250,6 @@ class SingleSequenceDataset(IterableDataset, Stateful):
         trainable_count: int,
     ):
         """Log debug information about the batch."""
-        global _DEBUG_BATCH_COUNT
         logger.warning("=" * 80)
         logger.warning(
             "[DEBUG DATALOADER] %s yielding batch %d", dataset_type, _DEBUG_BATCH_COUNT
@@ -419,7 +417,6 @@ class PackedSequencesDataset(IterableDataset, Stateful):
         trainable_count: int,
     ):
         """Log debug information about the batch."""
-        global _DEBUG_BATCH_COUNT
         logger.warning("=" * 80)
         logger.warning(
             "[DEBUG DATALOADER] PackedSequencesDataset yielding batch %d",
@@ -574,12 +571,14 @@ def build_finetune_dataloader(
         try:
             from transformers import AutoTokenizer
 
-            hf_tokenizer = AutoTokenizer.from_pretrained(job_config.model.hf_assets_path)
+            hf_tokenizer = AutoTokenizer.from_pretrained(
+                job_config.model.hf_assets_path
+            )
         except ImportError:
             raise ImportError(
                 "transformers package required for messages format. "
                 "Install with: pip install transformers"
-            )
+            ) from None
 
         # Get chat template config
         start_seq = getattr(

@@ -218,7 +218,7 @@ deepseekv3_args = {
         dim=7168,
         inter_dim=18432,
         moe_inter_dim=2048,
-        n_layers=2, # 1 Dense, 1 Moe (n_layers - n_dense_layers)
+        n_layers=2,  # 1 Dense, 1 Moe (n_layers - n_dense_layers)
         n_dense_layers=1,
         n_heads=128,
         moe_args=MoEArgs(
@@ -233,15 +233,15 @@ deepseekv3_args = {
             score_before_experts=False,
         ),
         # MLA LoRA ranks - adjust these as needed
-        q_lora_rank=1536,   # 0 = no low-rank Q projection, >0 = use low-rank
-        kv_lora_rank=512,   # Low-rank dimension for KV projections
+        q_lora_rank=1536,  # 0 = no low-rank Q projection, >0 = use low-rank
+        kv_lora_rank=512,  # Low-rank dimension for KV projections
         qk_nope_head_dim=128,
         qk_rope_head_dim=64,
         v_head_dim=128,
         attn_type="sdpa",
         attn_mask_type="block_causal",
         # Fine-tuning LoRA (for parameter-efficient fine-tuning)
-        finetune_lora_rank=16,    # 0 = disabled, >0 = enable LoRA fine-tuning
+        finetune_lora_rank=16,  # 0 = disabled, >0 = enable LoRA fine-tuning
         finetune_lora_alpha=32.0,  # LoRA scaling factor
     ),
 }

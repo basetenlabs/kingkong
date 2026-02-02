@@ -161,7 +161,9 @@ class BaseStateDictAdapter(ABC):
         index_path = os.path.join(checkpoint_dir, "model.safetensors.index.json")
         with open(index_path, "w") as f:
             json.dump(index_data, f, indent=2)
-        logger.info(f"Generated model.safetensors.index.json with {len(weight_map)} entries")
+        logger.info(
+            f"Generated model.safetensors.index.json with {len(weight_map)} entries"
+        )
 
 
 class StateDictAdapter(BaseStateDictAdapter):

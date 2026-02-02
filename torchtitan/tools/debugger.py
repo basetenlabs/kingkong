@@ -15,10 +15,10 @@ from torchtitan.tools.logging import logger
 
 def maybe_launch_debugger() -> None:
     """Launch debugpy debugger if DEBUG or DEBUGPY environment variable is set.
-    
+
     Environment variables:
         DEBUG or DEBUGPY: Set to "1", "true", or "yes" to enable debugging
-        DEBUG_WAIT_RANKS: Comma-separated list of ranks to wait for debugger, 
+        DEBUG_WAIT_RANKS: Comma-separated list of ranks to wait for debugger,
                           or "all" (default) to wait on all ranks
         DEBUG_TIMEOUT: Timeout in seconds to wait for debugger attachment (default: 30)
     """

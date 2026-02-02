@@ -22,6 +22,7 @@ exclude =
     ./build
     ./scripts,
     ./venv,
+    ./.venv,
     *.pyi
     .pre-commit-config.yaml
     *.md

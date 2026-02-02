@@ -329,7 +329,7 @@ python scripts/checkpoint_conversion/convert_to_hf.py \
     --export_dtype float16
 
 
-Run Training 
+Run Training
 
 NGPU=8 CONFIG_FILE="./torchtitan/models/deepseek_v3/train_configs/deepseek_aghilora.toml" ./run_train.sh
 
