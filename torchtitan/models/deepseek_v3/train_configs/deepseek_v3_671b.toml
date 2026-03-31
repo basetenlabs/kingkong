@@ -21,7 +21,7 @@ enable_wandb = false
 name = "deepseek_v3"
 flavor = "671B"
 hf_assets_path = "./assets/hf/DeepSeek-V3.1-Base"
-# converters = ["float8"]
+converters = ["float8"]
 
 [optimizer]
 name = "AdamW"
@@ -69,8 +69,8 @@ enable = true
 components = ["loss"] # ["model", "loss"]
 
 [quantize.linear.float8]
-enable_fsdp_float8_all_gather = false
-precompute_float8_dynamic_scale_for_fsdp = false
+enable_fsdp_float8_all_gather = true
+precompute_float8_dynamic_scale_for_fsdp = true
 filter_fqns = ["output", "router.gate"]
 
 [quantize.grouped_mm.float8]
