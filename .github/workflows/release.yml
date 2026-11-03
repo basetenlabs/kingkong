@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v6
+      - uses: chainguard-actions/actions-setup-python@64d43abab37098f001c33499cf9c74a158ff0cfc # v6.3.0
         with:
           python-version: "3.x"
 
@@ -23,7 +23,7 @@ jobs:
           python -m build
 
       - name: upload windows dists
-        uses: actions/upload-artifact@v6
+        uses: chainguard-actions/actions-upload-artifact@58b2f77fde711fbc8c271d0e5877c5d7d9a19733 # v6.0.0
         with:
           name: release-dists
           path: dist/
@@ -40,10 +40,10 @@ jobs:
 
     steps:
       - name: Retrieve release distributions
-        uses: actions/download-artifact@v7
+        uses: chainguard-actions/actions-download-artifact@cc673c30092424d3cb15266c177e77aef02c577e # v7.0.0
         with:
           name: release-dists
           path: dist/
 
       - name: Publish release distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # release/v1.13
+        uses: chainguard-actions/pypa-gh-action-pypi-publish@495a29a08e72be2668f4ed3035dc9c6c62ae929e  # release/v1.13

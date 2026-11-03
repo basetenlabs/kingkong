@@ -21,7 +21,7 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v6
       - name: Setup python
-        uses: actions/setup-python@v6
+        uses: chainguard-actions/actions-setup-python@64d43abab37098f001c33499cf9c74a158ff0cfc # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Update pip
