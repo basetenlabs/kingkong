@@ -15,8 +15,9 @@ concurrency:
 
 jobs:
   build-test:
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@56ff7c80ba4b86e7274e952e2b18468c0185f360 # main (before workflow removal)
     with:
+      test-infra-ref: 56ff7c80ba4b86e7274e952e2b18468c0185f360
       docker-image: torchtitan-ubuntu-20.04-clang12
       repository: pytorch/torchtitan
       script: |

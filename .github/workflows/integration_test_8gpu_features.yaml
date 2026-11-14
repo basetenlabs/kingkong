@@ -34,11 +34,12 @@ jobs:
   # Step 2: Use the dynamic matrix in the build-test job
   build-test:
     needs: set-matrix
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@8f7de1607e504c372169e13a70dc1d357424a23d # main
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.set-matrix.outputs.matrix) }}
     with:
+      test-infra-ref: 8f7de1607e504c372169e13a70dc1d357424a23d
       runner: ${{ matrix.runner }}
       gpu-arch-type: ${{ matrix.gpu-arch-type }}
       gpu-arch-version: ${{ matrix.gpu-arch-version }}
