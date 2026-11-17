@@ -43,19 +43,19 @@ jobs:
           mkdir "${GITHUB_WORKSPACE}"
 
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@8f7de1607e504c372169e13a70dc1d357424a23d # main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Checkout the repo
-        uses: actions/checkout@v6
+        uses: chainguard-actions/actions-checkout@40e53bf063d4f87f0a6e0a83231c09bcfb22bc19 # v6
 
       - name: Setup Linux
-        uses: pytorch/test-infra/.github/actions/setup-linux@main
+        uses: pytorch/test-infra/.github/actions/setup-linux@8f7de1607e504c372169e13a70dc1d357424a23d # main
 
       - name: Build docker image
         id: build-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@8f7de1607e504c372169e13a70dc1d357424a23d # main
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
@@ -63,5 +63,5 @@ jobs:
           force-push: true
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@8f7de1607e504c372169e13a70dc1d357424a23d # main
         if: always()

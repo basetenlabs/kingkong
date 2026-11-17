@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: chainguard-actions/actions-checkout@40e53bf063d4f87f0a6e0a83231c09bcfb22bc19 # v6
 
-      - uses: actions/setup-python@v6
+      - uses: chainguard-actions/actions-setup-python@64d43abab37098f001c33499cf9c74a158ff0cfc # v6.3.0
         with:
           python-version: "3.x"
 
@@ -23,7 +23,7 @@ jobs:
           python -m build
 
       - name: upload windows dists
-        uses: actions/upload-artifact@v6
+        uses: chainguard-actions/actions-upload-artifact@58b2f77fde711fbc8c271d0e5877c5d7d9a19733 # v6.0.0
         with:
           name: release-dists
           path: dist/
@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: Retrieve release distributions
-        uses: actions/download-artifact@v7
+        uses: chainguard-actions/actions-download-artifact@cc673c30092424d3cb15266c177e77aef02c577e # v7.0.0
         with:
           name: release-dists
           path: dist/
